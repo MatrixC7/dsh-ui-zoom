@@ -172,6 +172,8 @@ window.__ModuleLoader__.load({
     const origGetClientRects = Element.prototype.getClientRects;
     const origRangeGetBoundingClientRect = typeof Range !== 'undefined' ? Range.prototype.getBoundingClientRect : null;
     const origRangeGetClientRects = typeof Range !== 'undefined' ? Range.prototype.getClientRects : null;
+    const origElementFromPoint = typeof document !== 'undefined' ? Document.prototype.elementFromPoint : null;
+    const origElementsFromPoint = typeof document !== 'undefined' ? Document.prototype.elementsFromPoint : null;
 
     function scaleRect(rect, factor) {
       const x = rect.x / factor;
@@ -200,16 +202,47 @@ window.__ModuleLoader__.load({
       };
     }
 
-    function installRectPatches() {
+    // --- Viewport Dimension Scaling (for third-party floating widgets like dsh-whale-widget) ---
+    const origInnerWidthDesc = Object.getOwnPropertyDescriptor(window, 'innerWidth') || {
+      get() { return window.innerWidth; },
+      configurable: true
+    };
+    const origInnerHeightDesc = Object.getOwnPropertyDescriptor(window, 'innerHeight') || {
+      get() { return window.innerHeight; },
+      configurable: true
+    };
+    const origClientWidthDesc = Object.getOwnPropertyDescriptor(Element.prototype, 'clientWidth') || {
+      get() { return this.clientWidth; },
+      configurable: true
+    };
+    const origClientHeightDesc = Object.getOwnPropertyDescriptor(Element.prototype, 'clientHeight') || {
+      get() { return this.clientHeight; },
+      configurable: true
+    };
+
+    function isWhaleHitTestImg(el) {
+      // Only the whale hit-test image (.dshwv-img) needs raw physical coordinates to compare with MouseEvent clientX/clientY.
+      // Other whale elements (like root, menuBtn, menuBox, etc.) calculate layout positions against viewport, so they need scaled layout coordinates.
+      if (!el || typeof el.className !== 'string') return false;
+      return el.className.indexOf('dshwv-img') !== -1;
+    }
+
+    function installWindowAndRectPatches() {
+      // 1. Element & Range getBoundingClientRect
+      // For general elements (including DSH portal menus, popups, and whale position calculation elements),
+      // we scale the rect to layout coordinates (CSS pixels).
+      // Only .dshwv-img preserves the visual rect for pixel-perfect hit-testing.
       Element.prototype.getBoundingClientRect = function() {
         const rect = origGetBoundingClientRect.apply(this, arguments);
         if (currentScale === 100) return rect;
+        if (isWhaleHitTestImg(this)) return rect;
         return scaleRect(rect, currentScale / 100);
       };
 
       Element.prototype.getClientRects = function() {
         const list = origGetClientRects.apply(this, arguments);
         if (currentScale === 100) return list;
+        if (isWhaleHitTestImg(this)) return list;
         const factor = currentScale / 100;
         const result = [];
         for (let i = 0; i < list.length; i++) {
@@ -240,9 +273,74 @@ window.__ModuleLoader__.load({
           return result;
         };
       }
+
+      // 2. document.elementFromPoint
+      // Under CSS zoom, document.elementFromPoint takes layout coordinates (CSS pixels),
+      // whereas MouseEvents supply visual clientX/clientY. We convert visual coordinates to layout coordinates.
+      if (origElementFromPoint) {
+        Document.prototype.elementFromPoint = function(x, y) {
+          if (currentScale === 100) return origElementFromPoint.call(this, x, y);
+          const factor = currentScale / 100;
+          return origElementFromPoint.call(this, x / factor, y / factor) || origElementFromPoint.call(this, x, y);
+        };
+      }
+      if (origElementsFromPoint) {
+        Document.prototype.elementsFromPoint = function(x, y) {
+          if (currentScale === 100) return origElementsFromPoint.call(this, x, y);
+          const factor = currentScale / 100;
+          return origElementsFromPoint.call(this, x / factor, y / factor);
+        };
+      }
+
+      // 3. window.innerWidth & window.innerHeight
+      // Under CSS zoom, layout viewport dimensions in CSS pixels equal visual pixels divided by zoom factor.
+      try {
+        Object.defineProperty(window, 'innerWidth', {
+          get() {
+            const raw = origInnerWidthDesc.get ? origInnerWidthDesc.get.call(window) : window.outerWidth;
+            if (currentScale === 100) return raw;
+            return Math.round(raw / (currentScale / 100));
+          },
+          configurable: true
+        });
+      } catch (e) {}
+
+      try {
+        Object.defineProperty(window, 'innerHeight', {
+          get() {
+            const raw = origInnerHeightDesc.get ? origInnerHeightDesc.get.call(window) : window.outerHeight;
+            if (currentScale === 100) return raw;
+            return Math.round(raw / (currentScale / 100));
+          },
+          configurable: true
+        });
+      } catch (e) {}
+
+      // 4. documentElement.clientWidth & clientHeight fallback
+      try {
+        Object.defineProperty(Element.prototype, 'clientWidth', {
+          get() {
+            const raw = origClientWidthDesc.get ? origClientWidthDesc.get.call(this) : 0;
+            if (currentScale === 100 || this !== document.documentElement) return raw;
+            return Math.round(raw / (currentScale / 100));
+          },
+          configurable: true
+        });
+      } catch (e) {}
+
+      try {
+        Object.defineProperty(Element.prototype, 'clientHeight', {
+          get() {
+            const raw = origClientHeightDesc.get ? origClientHeightDesc.get.call(this) : 0;
+            if (currentScale === 100 || this !== document.documentElement) return raw;
+            return Math.round(raw / (currentScale / 100));
+          },
+          configurable: true
+        });
+      } catch (e) {}
     }
 
-    function uninstallRectPatches() {
+    function uninstallWindowAndRectPatches() {
       Element.prototype.getBoundingClientRect = origGetBoundingClientRect;
       Element.prototype.getClientRects = origGetClientRects;
       if (origRangeGetBoundingClientRect) {
@@ -251,6 +349,33 @@ window.__ModuleLoader__.load({
       if (origRangeGetClientRects) {
         Range.prototype.getClientRects = origRangeGetClientRects;
       }
+      if (origElementFromPoint) {
+        Document.prototype.elementFromPoint = origElementFromPoint;
+      }
+      if (origElementsFromPoint) {
+        Document.prototype.elementsFromPoint = origElementsFromPoint;
+      }
+
+      try {
+        if (origInnerWidthDesc) Object.defineProperty(window, 'innerWidth', origInnerWidthDesc);
+      } catch (e) {}
+      try {
+        if (origInnerHeightDesc) Object.defineProperty(window, 'innerHeight', origInnerHeightDesc);
+      } catch (e) {}
+      try {
+        if (origClientWidthDesc) Object.defineProperty(Element.prototype, 'clientWidth', origClientWidthDesc);
+      } catch (e) {}
+      try {
+        if (origClientHeightDesc) Object.defineProperty(Element.prototype, 'clientHeight', origClientHeightDesc);
+      } catch (e) {}
+    }
+
+    function syncWhaleWidgetPosition() {
+      if (typeof window === 'undefined') return;
+      // Dispatch resize event so third-party widgets like dsh-whale-widget re-settle with the new viewport dimensions
+      try {
+        window.dispatchEvent(new Event('resize'));
+      } catch (e) {}
     }
 
     function applyZoomToDOM(scale) {
@@ -260,6 +385,7 @@ window.__ModuleLoader__.load({
       } else {
         document.documentElement.style.zoom = String(scale / 100);
       }
+      syncWhaleWidgetPosition();
     }
 
     function showZoomToast(scale) {
@@ -412,10 +538,19 @@ window.__ModuleLoader__.load({
       apply(ctx) {
         ensureStyles();
 
-        // 1. Install rect patches, restore zoom and listen to keyboard / wheel shortcuts
+        // 1. Install rect & viewport patches, restore zoom and listen to keyboard / wheel shortcuts
         ctx.effect(() => {
-          installRectPatches();
+          installWindowAndRectPatches();
           applyZoomToDOM(currentScale);
+
+          // Workaround for third-party widget button clicks under pointerdown capture
+          function handleWhaleMenuBtnPointerDown(e) {
+            const btn = e.target && e.target.closest ? e.target.closest('.dshwv-menu-btn') : null;
+            if (btn) {
+              e.stopPropagation();
+            }
+          }
+          window.addEventListener('pointerdown', handleWhaleMenuBtnPointerDown, true);
 
           function handleKeyDown(e) {
             if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
@@ -446,7 +581,8 @@ window.__ModuleLoader__.load({
           window.addEventListener('wheel', handleWheel, { passive: false });
 
           return () => {
-            uninstallRectPatches();
+            uninstallWindowAndRectPatches();
+            window.removeEventListener('pointerdown', handleWhaleMenuBtnPointerDown, true);
             window.removeEventListener('keydown', handleKeyDown, { capture: true });
             window.removeEventListener('wheel', handleWheel);
             if (toastTimeout) clearTimeout(toastTimeout);
@@ -455,6 +591,7 @@ window.__ModuleLoader__.load({
               toastEl = null;
             }
             document.documentElement.style.zoom = '';
+            syncWhaleWidgetPosition();
           };
         });
 
