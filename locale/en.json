@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "UI Zoom",
+    "description": "Scales the entire DSH user interface proportionally (like VS Code window zoom) to 110%, 125%, 150%, etc."
+  }
+}
