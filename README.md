@@ -1,85 +1,93 @@
-# dsh-ui-zoom
+# dsh-ui-zoom 界面缩放插件
 
-[English](README.md) | [中文](README.zh.md)
+[中文](README.md) | [English](README.en.md)
 
-> A UI Zoom / Window Scaling plugin for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness). Scale the entire application interface proportionally (80%, 110%, 125%, 150%, etc.) just like in VS Code.
+> 适用于 [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) 的全局 UI 缩放插件。类似于 VS Code 的窗口缩放机制，支持将整个界面等比例缩放至 80%、110%、125%、150% 等任意比例。
 
-![UI Zoom Preview](icon.svg)
-
----
-
-## ✨ Features
-
-- 🔍 **Proportional UI Zooming**: Unlike simple font-size scaling, this scales the entire UI — sidebars, inputs, buttons, chat cards, spacing, icons, and fonts proportionally.
-- ⚙️ **Native Settings Integration**: Automatically adds a "UI Scale" (`界面缩放`) section under **Settings -> General**, right below the font size option.
-- 🎛️ **Quick Presets & Fine-tuning**:
-  - One-click presets: `80%`, `90%`, `100%`, `110%`, `125%`, `150%`.
-  - Stepper controls (`−` / `+`) with smooth 5%–10% steps.
-  - One-click **Reset (100%)** button.
-- ⌨️ **Global Keyboard Shortcuts** (VS Code style):
-  - `Ctrl + =` / `Ctrl + +` (or `Cmd` on macOS): Zoom in.
-  - `Ctrl + -` (or `Cmd` on macOS): Zoom out.
-  - `Ctrl + 0` (or `Cmd` on macOS): Reset zoom to 100%.
-  - `Ctrl + Mouse Wheel`: Zoom in/out smoothly.
-- 🧭 **Visual HUD Feedback**: Shows a clean, translucent toast indicator in the bottom-right corner when zooming via shortcuts or wheel.
-- 🎯 **Pixel-Perfect Popover Alignment**: Includes an internal coordinate calibration engine so portal popups (such as the bottom-left account menu, dropdowns, and tooltips) remain perfectly anchored without offset or floating gaps at any zoom level.
-- 💾 **Persistent**: Zoom settings are saved in local storage and automatically restored across sessions and page reloads.
+![UI 缩放图标](icon.svg)
 
 ---
 
-## 📦 Installation
+## ✨ 功能特性
 
-### Option 1: Install from Local Clone (Recommended for Developers)
+- 🔍 **等比整体缩放**：不同于单纯修改字体字号，本插件成比例缩放整个应用界面的所有元素（包括侧边栏、输入区域、按钮、对话卡片、间距、图标及字体）。
+- ⚙️ **无缝融入设置面板**：自动注册至「**设置 -> 通用**」，紧跟在「字号」选项下方。
+- 🎛️ **常用预设与微调**：
+  - 常用预设快捷按钮：`80%`、`90%`、`100%`、`110%`、`125%`、`150%`。
+  - 步进器按钮（`−` / `+`）支持平滑微调。
+  - 一键 **重置 (100%)** 按钮。
+- ⌨️ **全局快捷键支持**（VS Code 习惯）：
+  - **`Ctrl` + `=`** 或 **`Ctrl` + `+`**（macOS 上为 `Cmd`）：放大界面。
+  - **`Ctrl` + `-`**（macOS 上为 `Cmd`）：缩小界面。
+  - **`Ctrl` + `0`**（macOS 上为 `Cmd`）：一键重置为 100%。
+  - **`Ctrl` + 鼠标滚轮**：按住 Ctrl 滚动鼠标滚轮快速连续缩放。
+- 🧭 **即时 HUD 提示**：使用快捷键或滚轮调整缩放时，屏幕右下角自动浮现半透明提示框展示当前缩放百分比。
+- 🎯 **完美解决浮层错位（Double-Zoom Fix）**：内置视口坐标空间校准机制，解决 CSS `zoom` 下通过 `createPortal` 挂载的弹出菜单（如左下角用户名菜单、下拉选择器、工具提示等）位置错位或悬空的问题，始终精准贴合。
+- 💾 **自动持久化**：缩放配置自动保存在本地缓存中，刷新页面或下次启动时自动恢复。
 
-1. Clone this repository into your workspace:
+---
+
+## 📦 安装方式
+
+### 方式 1：本地仓库安装（推荐）
+
+1. 将本仓库克隆至你的工作区或本地目录：
    ```bash
-   git clone https://github.com/<your-username>/dsh-ui-zoom.git
+   git clone https://github.com/<你的用户名>/dsh-ui-zoom.git
    ```
 
-2. Install the bundle into your active DSH profile using DSH Plugin Manager or the CLI:
+2. 在 DSH 终端中使用 CLI 或通过 Plugin Manager 安装到当前 Profile：
    ```bash
    dsh profile install-bundle /path/to/dsh-ui-zoom
    ```
-   *Or ask your DSH assistant in the chat:*
-   > "请帮我安装工作区下的 dsh-ui-zoom 插件"
+   *也可以直接在 DSH 对话框中让助手安装：*
+   > “请帮我安装工作区下的 dsh-ui-zoom 插件”
 
-3. Refresh your DSH window (`Ctrl + R` or `F5`).
+3. 刷新 DSH 窗口（`Ctrl + R` 或 `F5`）即可立即生效。
 
-### Option 2: Install via npm (If Published)
+### 方式 2：通过 npm 安装（若已发布）
 
-Once published to npm (e.g. `dsh-plugin-ui-zoom`):
+如果将该包发布至 npm（例如 `dsh-ui-zoom`）：
 ```bash
-dsh profile install-bundle dsh-plugin-ui-zoom
+dsh profile install-bundle dsh-ui-zoom
 ```
 
 ---
 
-## 🚀 Usage
+## 🚀 使用指南
 
-### Method 1: Settings Panel
-1. Click the **Settings (设置)** icon in the sidebar.
-2. Go to **General (通用)**.
-3. Locate **UI Scale (界面缩放)** to pick a preset or adjust with `+` / `−`.
+### 方式 1：从设置面板调节
+1. 点击左下角齿轮「**设置**」。
+2. 点击「**通用**」选项卡。
+3. 找到「**界面缩放**」，直接点击常用预设比例或使用 `+` / `−` 进行调整。
 
-### Method 2: Shortcuts
-- Press `Ctrl + =` to scale up.
-- Press `Ctrl + -` to scale down.
-- Press `Ctrl + 0` to restore default.
-- Hold `Ctrl` and scroll your mouse wheel.
-
----
-
-## 🛠️ Architecture
-
-- **Host Entry (`index.js`)**: Declares the Cordis bundle manifest.
-- **Client Module (`client.js`)**:
-  - Injects into the `settings.general.item` slot via `@deepseek-ai/cordis`.
-  - Manages global keyboard and mouse wheel listeners.
-  - Dynamically aligns `Element.prototype.getBoundingClientRect` coordinates in zoomed space, ensuring portal menus (like `createPortal(..., document.body)`) stay pixel-perfect.
-- **Localization (`locale/`)**: Built-in support for English and Simplified Chinese.
+### 方式 2：使用快捷键
+- 按 `Ctrl + =` 放大。
+- 按 `Ctrl + -` 缩小。
+- 按 `Ctrl + 0` 恢复默认大小。
+- 按住 `Ctrl` 滚动鼠标滚轮放大/缩小。
 
 ---
 
-## 📄 License
+## 🛠️ 项目结构
 
-[MIT License](LICENSE)
+```text
+dsh-ui-zoom/
+├── package.json          # 插件清单与配置
+├── cordis.patch.yml      # DSH Cordis 编排补丁
+├── index.js              # Host 端入口
+├── client.js             # Client 端渲染逻辑、DOM 缩放与坐标修复
+├── icon.svg              # 矢量图标
+├── locale/
+│   ├── zh.json           # 简体中文文案与元数据
+│   └── en.json           # 英文文案与元数据
+├── LICENSE               # MIT 开源许可证
+├── README.md             # 默认中文说明文档
+└── README.en.md          # 英文说明文档
+```
+
+---
+
+## 📄 开源许可证
+
+本项目采用 [MIT 许可证](LICENSE)。
