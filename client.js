@@ -67,10 +67,14 @@ window.__ModuleLoader__.load({
         border-color: var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.4));
       }
       .dsh-ui-zoom-preset-btn.active {
-        background: var(--dsw-alias-brand-primary, #2563eb);
-        color: #ffffff;
+        background: #2563eb;
+        color: #ffffff !important;
         border-color: transparent;
         font-weight: 600;
+      }
+      body[data-ds-dark-theme] .dsh-ui-zoom-preset-btn.active {
+        background: var(--dsw-static-deepseek-450, #5686fe);
+        color: #ffffff !important;
       }
       .dsh-ui-zoom-stepper {
         border-radius: var(--dsw-radius-md, 6px);
