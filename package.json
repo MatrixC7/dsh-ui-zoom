@@ -1,6 +1,6 @@
 {
   "name": "dsh-ui-zoom",
-  "version": "1.0.0",
+  "version": "0.4.0",
   "description": "UI Zoom plugin for DeepSeek Harness (DSH) — Scale entire application interface proportionally like VS Code.",
   "type": "module",
   "license": "MIT",
