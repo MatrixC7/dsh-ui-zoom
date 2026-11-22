@@ -155,15 +155,10 @@ window.__ModuleLoader__.load({
         '[data-dsh-panel-host]'
       ],
 
-      // 2. Quirk: Third-party widgets that perform raw physical hit-testing (e.g. dsh-whale-widget)
-      // need unscaled bounding rects to compare against raw MouseEvent clientX/clientY.
-      isUnscaledHitTestElement(el) {
-        if (!el) return false;
-        if (typeof el.className === 'string' && el.className.indexOf('dshwv-img') !== -1) {
-          return true;
-        }
-        return false;
-      },
+      // 2. No widget keeps raw visual rects anymore: the coordinate engine below exposes
+      // CSS layout pixels to every API a script can read (rects, viewport sizes and pointer
+      // events), so a third-party widget must compare layout rects with layout event
+      // coordinates — mixing in raw visual pixels is what broke hit-testing under zoom.
 
       // 3. Quirk: Third-party widget buttons that handle pointer events in capturing phase
       // can be interrupted or mis-routed under zoom; prevent pointerdown capture leakage.
@@ -222,14 +217,33 @@ window.__ModuleLoader__.load({
     /* =========================================================================
      * SECTION 3: Viewport & Geometry Coordinate Engine
      *
-     * In Chromium with CSS zoom:
-     * 1. Window innerWidth / innerHeight & VisualViewport incorrectly report
-     *    unscaled physical pixels. We hook them to return CSS layout pixels.
-     * 2. getBoundingClientRect / getClientRects are scaled to CSS layout pixels
-     *    so that React Portals, popovers, dropdowns, and anchor calculations
-     *    do not suffer from double-zoom positioning errors.
-     * 3. elementFromPoint is calibrated from visual pointer coords to layout coords.
-     * 4. Whale widget hit-testing image (.dshwv-img) is preserved in raw coordinates.
+     * In Chromium with CSS zoom on <html>, everything a script can read is
+     * reported in visual (device) pixels, while CSS lengths are interpreted in
+     * the zoomed (layout) coordinate space. This engine exposes one single space
+     * to application code — CSS layout pixels — so anchors, portals and
+     * hit-testing all agree:
+     * 1. window.innerWidth / innerHeight & VisualViewport are converted from
+     *    visual pixels to CSS layout pixels.
+     * 2. Element/Range getBoundingClientRect & getClientRects are converted to
+     *    CSS layout pixels, so React Portals, popovers, dropdowns and anchor
+     *    calculations do not suffer from double-zoom positioning errors.
+     * 3. Pointer, mouse, wheel and touch event coordinates (clientX/clientY,
+     *    pageX/pageY, offsetX/offsetY, movementX/movementY, x/y) are converted
+     *    to that same space. Without it, CodeMirror's posAtCoords (the markdown
+     *    editor caret), drag handles and cursor-anchored menus compare visual
+     *    pixels against layout rects and land far from the pointer.
+     * 4. elementFromPoint / elementsFromPoint / caretRangeFromPoint /
+     *    caretPositionFromPoint accept layout pixels and convert them back to
+     *    the visual pixels the DOM hit-testing APIs expect.
+     *
+     * Known limits, kept in visual pixels on purpose:
+     * - window.scrollX / scrollY and pageXOffset / pageYOffset: Chromium reads
+     *   and writes root scrolling in visual pixels, so scaling only the getters
+     *   would desynchronize them from scrollTo();
+     * - document.documentElement.clientWidth / clientHeight: the root-viewport
+     *   special case (every other element already reports layout pixels);
+     * - IntersectionObserverEntry rects, wheel deltas and screenX / screenY are
+     *   not pointer positions in the document layout.
      * ========================================================================= */
     const origGetBoundingClientRect = Element.prototype.getBoundingClientRect;
     const origGetClientRects = Element.prototype.getClientRects;
@@ -237,11 +251,55 @@ window.__ModuleLoader__.load({
     const origRangeGetClientRects = typeof Range !== 'undefined' ? Range.prototype.getClientRects : null;
     const origElementFromPoint = typeof document !== 'undefined' ? Document.prototype.elementFromPoint : null;
     const origElementsFromPoint = typeof document !== 'undefined' ? Document.prototype.elementsFromPoint : null;
+    const origCaretRangeFromPoint = typeof document !== 'undefined' ? Document.prototype.caretRangeFromPoint : null;
+    const origCaretPositionFromPoint = typeof document !== 'undefined' ? Document.prototype.caretPositionFromPoint : null;
+
+    // --- Pointer coordinate hooks ---
+    // Every patched getter keeps its original descriptor so the teardown restores it exactly.
+    const pointerCoordProps = ['clientX', 'clientY', 'x', 'y', 'offsetX', 'offsetY', 'pageX', 'pageY', 'movementX', 'movementY'];
+    const touchCoordProps = ['clientX', 'clientY', 'pageX', 'pageY'];
+    const coordRestores = [];
+
+    function toLayoutPixels(value) {
+      if (currentScale === 100) return value;
+      return value / (currentScale / 100);
+    }
+
+    function patchCoordinateGetters(proto, props) {
+      if (!proto) return;
+      for (const prop of props) {
+        const desc = Object.getOwnPropertyDescriptor(proto, prop);
+        if (!desc || typeof desc.get !== 'function') continue;
+        try {
+          const patched = {
+            configurable: true,
+            enumerable: desc.enumerable,
+            get() {
+              return toLayoutPixels(desc.get.call(this));
+            }
+          };
+          if (typeof desc.set === 'function') {
+            patched.set = function set(value) { desc.set.call(this, value); };
+          }
+          Object.defineProperty(proto, prop, patched);
+          coordRestores.push({ proto, prop, desc });
+        } catch (e) {}
+      }
+    }
+
+    function unpatchCoordinateGetters() {
+      for (let i = coordRestores.length - 1; i >= 0; i--) {
+        const entry = coordRestores[i];
+        try { Object.defineProperty(entry.proto, entry.prop, entry.desc); } catch (e) {}
+      }
+      coordRestores.length = 0;
+    }
 
     // --- Window & Viewport Dimension Hooks ---
-    // Under CSS zoom, Chromium buggily reports unscaled physical dimensions on window.innerWidth / innerHeight
-    // and visualViewport (while document.documentElement.clientWidth/clientHeight are properly scaled).
-    // We calibrate window.innerWidth, window.innerHeight, and visualViewport getters to CSS layout pixels.
+    // Under CSS zoom, Chromium reports visual pixels on window.innerWidth /
+    // innerHeight and visualViewport, while CSS lengths are layout pixels.
+    // Calibrate the viewport getters to CSS layout pixels (documentElement.client*
+    // keeps its root-viewport special case, listed under known limits above).
     const origInnerWidthDesc = typeof window !== 'undefined'
       ? (Object.getOwnPropertyDescriptor(window, 'innerWidth') || Object.getOwnPropertyDescriptor(Window.prototype, 'innerWidth'))
       : null;
@@ -284,12 +342,11 @@ window.__ModuleLoader__.load({
       };
     }
 
-    function isUnscaledElement(el) {
-      if (!el) return false;
-      return COMPAT_SHIM.isUnscaledHitTestElement(el);
-    }
-
     function installWindowAndRectPatches() {
+      // An effect re-run must start from the native getters, otherwise pointer
+      // coordinates would be divided by the zoom factor twice.
+      unpatchCoordinateGetters();
+
       // 1. window.innerWidth & window.innerHeight
       if (origInnerWidthDesc && origInnerWidthDesc.get) {
         try {
@@ -369,20 +426,17 @@ window.__ModuleLoader__.load({
       }
 
       // 3. Element & Range getBoundingClientRect
-      // For general elements (including DSH portal menus, popups, and whale position calculation elements),
-      // we scale the rect to layout coordinates (CSS pixels).
-      // Only unscaled elements preserve raw physical rects.
+      // Everything (including DSH portal menus, popups and third-party widget
+      // positioning) receives rects in layout coordinates (CSS pixels).
       Element.prototype.getBoundingClientRect = function() {
         const rect = origGetBoundingClientRect.apply(this, arguments);
         if (currentScale === 100) return rect;
-        if (isUnscaledElement(this)) return rect;
         return scaleRect(rect, currentScale / 100);
       };
 
       Element.prototype.getClientRects = function() {
         const list = origGetClientRects.apply(this, arguments);
         if (currentScale === 100) return list;
-        if (isUnscaledElement(this)) return list;
         const factor = currentScale / 100;
         const result = [];
         for (let i = 0; i < list.length; i++) {
@@ -414,9 +468,9 @@ window.__ModuleLoader__.load({
         };
       }
 
-      // 4. document.elementFromPoint
-      // Under CSS zoom, document.elementFromPoint takes layout coordinates (CSS pixels),
-      // whereas MouseEvents supply visual clientX/clientY. We convert visual coordinates to layout coordinates.
+      // 4. document.elementFromPoint & friends
+      // The DOM hit-testing APIs take visual (physical) pixels natively; callers in
+      // this layout-coordinate world pass CSS layout pixels, so convert them back.
       if (origElementFromPoint) {
         Document.prototype.elementFromPoint = function(x, y) {
           if (currentScale === 100) return origElementFromPoint.call(this, x, y);
@@ -430,6 +484,35 @@ window.__ModuleLoader__.load({
           const factor = currentScale / 100;
           return origElementsFromPoint.call(this, x / factor, y / factor);
         };
+      }
+      if (origCaretRangeFromPoint) {
+        Document.prototype.caretRangeFromPoint = function(x, y) {
+          if (currentScale === 100) return origCaretRangeFromPoint.call(this, x, y);
+          const factor = currentScale / 100;
+          return origCaretRangeFromPoint.call(this, x / factor, y / factor);
+        };
+      }
+      if (origCaretPositionFromPoint) {
+        Document.prototype.caretPositionFromPoint = function(x, y) {
+          if (currentScale === 100) return origCaretPositionFromPoint.call(this, x, y);
+          const factor = currentScale / 100;
+          return origCaretPositionFromPoint.call(this, x / factor, y / factor);
+        };
+      }
+
+      // 5. Pointer coordinate calibration
+      // MouseEvent's clientX/clientY, pageX/pageY, offsetX/offsetY, movementX/Y
+      // and x/y are read together with the rects above by drag handles,
+      // CodeMirror and cursor-anchored menus, so they use the same layout-pixel
+      // space. PointerEvent, WheelEvent and DragEvent inherit MouseEvent and are
+      // covered here; wheel *delta* values are not coordinates and stay as they
+      // are. Touch carries its own getters and is patched separately, while
+      // screenX/screenY remain physical screen pixels.
+      if (typeof MouseEvent !== 'undefined') {
+        patchCoordinateGetters(MouseEvent.prototype, pointerCoordProps);
+      }
+      if (typeof Touch !== 'undefined') {
+        patchCoordinateGetters(Touch.prototype, touchCoordProps);
       }
     }
 
@@ -462,6 +545,13 @@ window.__ModuleLoader__.load({
       if (origElementsFromPoint) {
         Document.prototype.elementsFromPoint = origElementsFromPoint;
       }
+      if (origCaretRangeFromPoint) {
+        Document.prototype.caretRangeFromPoint = origCaretRangeFromPoint;
+      }
+      if (origCaretPositionFromPoint) {
+        Document.prototype.caretPositionFromPoint = origCaretPositionFromPoint;
+      }
+      unpatchCoordinateGetters();
     }
 
     /* =========================================================================

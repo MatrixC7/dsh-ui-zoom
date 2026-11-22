@@ -23,6 +23,7 @@
   - `Ctrl + Mouse Wheel`: Zoom in/out smoothly.
 - 🧭 **Visual HUD Feedback**: Shows a clean, translucent toast indicator in the bottom-right corner when zooming via shortcuts or wheel.
 - 🎯 **Pixel-Perfect Popover Alignment**: Includes an internal coordinate calibration engine so portal popups (such as the bottom-left account menu, dropdowns, and tooltips) remain perfectly anchored without offset or floating gaps at any zoom level.
+- 🖱️ **Unified Pointer Coordinates**: Mouse/touch event coordinates (`clientX/clientY`, `pageX/pageY`, `offsetX/offsetY`, `movementX/movementY`) are normalized into the same CSS layout space as `getBoundingClientRect` and `window.innerWidth`. The caret and selection in the sidebar's CodeMirror markdown editor therefore land exactly under the pointer, and drag handles, context menus and image panning stay aligned at any zoom level.
 - 💾 **Persistent**: Zoom settings are saved in local storage and automatically restored across sessions and page reloads.
 
 ---
@@ -75,7 +76,7 @@ dsh profile install-bundle dsh-ui-zoom
 - **Client Module (`client.js`)**:
   - Injects into the `settings.general.item` slot via `@deepseek-ai/cordis`.
   - Manages global keyboard and mouse wheel listeners.
-  - Dynamically aligns `Element.prototype.getBoundingClientRect` coordinates in zoomed space, ensuring portal menus (like `createPortal(..., document.body)`) stay pixel-perfect.
+  - Normalizes `Element.prototype.getBoundingClientRect`, `Range` rects, viewport sizes and pointer event coordinates into one CSS layout space, ensuring portal menus (like `createPortal(..., document.body)`) stay pixel-perfect and editors (CodeMirror caret/selection) hit-test exactly under the pointer.
 - **Localization (`locale/`)**: Built-in support for English and Simplified Chinese.
 
 ```text

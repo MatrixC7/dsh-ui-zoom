@@ -23,6 +23,7 @@
   - **`Ctrl` + 鼠标滚轮**：按住 Ctrl 滚动鼠标滚轮快速连续缩放。
 - 🧭 **即时 HUD 提示**：使用快捷键或滚轮调整缩放时，屏幕右下角自动浮现半透明提示框展示当前缩放百分比。
 - 🎯 **完美解决浮层错位（Double-Zoom Fix）**：内置视口坐标空间校准机制，解决 CSS `zoom` 下通过 `createPortal` 挂载的弹出菜单（如左下角用户名菜单、下拉选择器、工具提示等）位置错位或悬空的问题，始终精准贴合。
+- 🖱️ **统一指针坐标系（Pointer Coordinate Calibration）**：鼠标/触控事件的 `clientX/clientY`、`pageX/pageY`、`offsetX/offsetY`、`movementX/movementY` 与 `getBoundingClientRect`、`window.innerWidth` 等全部换算到同一套 CSS 布局坐标。右侧栏 Markdown 编辑模式（CodeMirror）中的光标与选区因此精确落在鼠标位置，拖拽分隔条、框选复制、右键菜单、图片平移等交互也不会再随缩放偏移。
 - 💾 **自动持久化**：缩放配置自动保存在本地缓存中，刷新页面或下次启动时自动恢复。
 
 ---
