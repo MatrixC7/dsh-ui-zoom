@@ -28,7 +28,7 @@
 - 🧭 **缩放 HUD**：快捷键/滚轮触发时，右下角短暂显示当前百分比，并带无障碍播报。
 - 🎯 **浮层与命中测试修正**：统一坐标空间，修复 CSS `zoom` 下 Portal 菜单、右键菜单、分隔条拖拽、图片平移、终端选区以及右侧栏 Markdown 编辑器（CodeMirror）光标/选区的偏移。
 - 💾 **持久化与多窗口**：缩放值保存在本地，刷新/重启自动恢复；同一 GUI 的其他窗口或标签页会跟随变化。
-- ⚙️ **可配置的部署参数**：默认比例、上下限、步进、`100vh` 兼容规则均可在 profile 的 `cordis.patch.yml` 中调整。
+- ⚙️ **可配置的部署参数**：默认比例、上下限、步进，以及 `100vh` 浮层与模态弹窗的兼容规则，均可在 profile 的 `cordis.patch.yml` 中调整。
 
 ---
 
@@ -138,6 +138,7 @@ dsh plugin --profile web remove dsh-ui-zoom
     maxScale: 250            # 最大比例
     step: 5                  # 步进按钮与滚轮的阶梯（5–50）
     compatOverlayHostHeight: true  # 100vh 浮层宿主改写为 height:100%（better-sidebar 兼容）
+    compatDialogClamp: true        # 超出窗口的模态 <dialog> 收进窗口内（第三方弹窗兼容）
 ```
 
 | 字段 | 默认值 | 说明 |
@@ -147,6 +148,7 @@ dsh plugin --profile web remove dsh-ui-zoom
 | `maxScale` | `250` | 可缩放到的最大值 |
 | `step` | `5` | 步进/滚轮每档的百分比 |
 | `compatOverlayHostHeight` | `true` | 是否启用 `[data-dsh-panel-host] { height:100% }` 兼容规则 |
+| `compatDialogClamp` | `true` | 是否把超出窗口的模态 `<dialog>` 收进窗口（见下方「弹窗被顶出窗口」） |
 
 修改后重启 DSH 生效。桌面端也可以直接在 profile 文件中调整后重启应用。
 
@@ -158,6 +160,7 @@ dsh plugin --profile web remove dsh-ui-zoom
 - 插件把矩形、视口尺寸、指针事件与命中测试统一换算到 CSS 布局像素；以下 API 按浏览器语义保持视觉像素，混用时需自行换算：窗口滚动量、`document.documentElement.clientWidth/clientHeight`、`IntersectionObserver` 条目矩形、滚轮 delta、`screenX/screenY`。详见 [`client.js`](client.js) 顶部说明。
 - 命中测试 API（`elementFromPoint` / `elementsFromPoint` / `caretRangeFromPoint` / `caretPositionFromPoint`）接收布局坐标，由插件换算成浏览器需要的视觉坐标。
 - 第三方插件若自行对 CSS `zoom` 做补偿，可能与本插件重复换算；遇到偏移请先停用其他缩放/transform 类插件排查。
+- **视口单位不随缩放缩小**：Chromium 不会把 `100vh`/`100vw` 除以 CSS `zoom`，所以用 `max-height: calc(100vh - …)` 限制高度的浮层在放大后会比窗口还大。模态 `<dialog>` 由 `compatDialogClamp` 收进窗口（见下条）；其他固定浮层如需自行补偿，可除以本插件在根元素上提供的 `--dsh-ui-zoom-factor`（例如 `calc(100vh / var(--dsh-ui-zoom-factor, 1))`）。
 - 极端缩放（如 250%）下整页重排仍然存在，滚轮合帧只能降低频率。
 
 ---
@@ -182,11 +185,14 @@ Host Config 在 DSH 启动时注入页面，必须重启 DSH；仅刷新窗口�
 **和 dsh-better-sidebar 的 100vh 冲突？**
 默认开启 `compatOverlayHostHeight` 兼容规则；如需关闭，按上面的配置改为 `false` 并重启。
 
+**弹窗被顶出窗口，右上角 × 点不到？（例如 dsh-cost-meter 的费用统计弹窗）**
+这是「视口单位不随缩放缩小」导致的：弹窗用 `max-height: calc(100vh - …)` 限制高度，放大到 125% 以上时它会被排成比窗口高出一截，居中显示后标题栏连同 × 被顶到窗口上沿之外，只剩几个像素留在窗口里，所以鼠标移上去没有悬停效果、按下去也没反应。`0.5.1` 起由 `compatDialogClamp` 自动把这类「实测超出窗口」的模态弹窗收进窗口（100% 缩放时完全不动它）；如需关闭，把该配置改为 `false` 并重启。第三方弹窗自身改成 `max-height: calc(100% - …)` 也能根治。
+
 ---
 
 ## 🧪 开发与回归测试
 
-仓库自带无第三方依赖的回归测试：启动本地静态服务，用真实 Chromium 通过 DevTools 协议驱动夹具页面，覆盖指针坐标、拖选、5% 阶梯、`Ctrl + 滚轮` 合帧、Host Config、locale 切换、快捷键注册/回退与卸载还原。
+仓库自带无第三方依赖的回归测试：启动本地静态服务，用真实 Chromium 通过 DevTools 协议驱动夹具页面，覆盖指针坐标、拖选、5% 阶梯、`Ctrl + 滚轮` 合帧、Host Config、locale 切换、快捷键注册/回退、超窗弹窗收敛与卸载还原。
 
 ```bash
 # 需要 Node.js >= 22；CHROME_PATH 指向 Chrome/Chromium（CI 中自动设置）

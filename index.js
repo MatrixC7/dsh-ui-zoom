@@ -15,6 +15,8 @@ import z from '@deepseek-ai/schemastery'
  * - `step`: ladder step for the stepper buttons and Ctrl+wheel, in percent.
  * - `compatOverlayHostHeight`: rewrite `100vh` overlay hosts to `height:100%`
  *   (dsh-better-sidebar compatibility).
+ * - `compatDialogClamp`: keep modal `<dialog>` elements that overflow the
+ *   window inside it under zoom (third-party dialogs sized with `100vh`).
  */
 export const Config = z.object({
   defaultScale: z.natural().min(50).max(250).default(100),
@@ -22,6 +24,7 @@ export const Config = z.object({
   maxScale: z.natural().min(50).max(250).default(250),
   step: z.natural().min(5).max(50).default(5),
   compatOverlayHostHeight: z.boolean().default(true),
+  compatDialogClamp: z.boolean().default(true),
 })
 
 /** The page injection needs the web server. */

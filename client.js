@@ -155,26 +155,51 @@ window.__ModuleLoader__.load({
         '[data-dsh-panel-host]'
       ],
 
-      // 2. No widget keeps raw visual rects anymore: the coordinate engine below exposes
+      // 2. Quirk: the same viewport-unit rule breaks modal <dialog> elements. A dialog that
+      // caps its height the usual third-party way — 'max-height: calc(100vh - …)' — is laid
+      // out zoom-factor times taller than the window at 125%+, because 1vh stays one
+      // *unscaled* viewport pixel while every CSS length around it is rendered magnified.
+      // It keeps centred through 'margin:auto', so its header — and the close button in that
+      // header — is pushed above the window's top edge: only a few pixels of the button stay
+      // inside the window, which is exactly why it looks present but almost never receives a
+      // hover or a click (and why it is trivial to click at 100%).
+      // The clamp rule below caps *percentages*, which do resolve in the zoomed (layout)
+      // coordinate space — '100%' there is the zoom-corrected viewport. It is only applied to
+      // dialogs the shim measured as overflowing, so a dialog that already fits, and every
+      // dialog at 100%, keeps the author's CSS untouched.
+      dialogClampAttribute: 'data-dsh-ui-zoom-clamp',
+
+      // 3. No widget keeps raw visual rects anymore: the coordinate engine below exposes
       // CSS layout pixels to every API a script can read (rects, viewport sizes and pointer
       // events), so a third-party widget must compare layout rects with layout event
       // coordinates — mixing in raw visual pixels is what broke hit-testing under zoom.
 
-      // 3. Quirk: Third-party widget buttons that handle pointer events in capturing phase
+      // 4. Quirk: Third-party widget buttons that handle pointer events in capturing phase
       // can be interrupted or mis-routed under zoom; prevent pointerdown capture leakage.
       isProtectedPointerElement(el) {
         return !!(el && el.closest && el.closest('.dshwv-menu-btn'));
       },
 
       generateCssRules() {
-        if (!this.overlayHostSelectors.length) return '';
-        if (SETTINGS && SETTINGS.compatOverlayHostHeight === false) return '';
-        return `
+        const rules = [];
+        if (this.overlayHostSelectors.length && (!SETTINGS || SETTINGS.compatOverlayHostHeight !== false)) {
+          rules.push(`
           /* Compatibility Shim: normalize fixed overlay hosts with 100vh under CSS zoom */
           ${this.overlayHostSelectors.join(',\n')} {
             height: 100% !important;
           }
-        `;
+        `);
+        }
+        if (!SETTINGS || SETTINGS.compatDialogClamp !== false) {
+          rules.push(`
+          /* Compatibility Shim: keep overflowing modal dialogs inside the zoomed viewport */
+          dialog[${this.dialogClampAttribute}] {
+            max-height: calc(100% - var(--dsh-frame-chrome-top, 0px) - 32px) !important;
+            max-width: calc(100% - 32px) !important;
+          }
+        `);
+        }
+        return rules.join('\n');
       }
     };
 
@@ -308,7 +333,8 @@ window.__ModuleLoader__.load({
       minScale: 50,
       maxScale: 250,
       step: 5,
-      compatOverlayHostHeight: true
+      compatOverlayHostHeight: true,
+      compatDialogClamp: true
     };
 
     function readUiZoomSettings() {
@@ -330,7 +356,10 @@ window.__ModuleLoader__.load({
       const compatOverlayHostHeight = source.compatOverlayHostHeight === undefined
         ? DEFAULT_SETTINGS.compatOverlayHostHeight
         : source.compatOverlayHostHeight !== false;
-      return { defaultScale, minScale, maxScale, step, compatOverlayHostHeight };
+      const compatDialogClamp = source.compatDialogClamp === undefined
+        ? DEFAULT_SETTINGS.compatDialogClamp
+        : source.compatDialogClamp !== false;
+      return { defaultScale, minScale, maxScale, step, compatOverlayHostHeight, compatDialogClamp };
     }
 
     const SETTINGS = readUiZoomSettings();
@@ -704,6 +733,143 @@ window.__ModuleLoader__.load({
     }
 
     /* =========================================================================
+     * SECTION 3b: Top-layer Dialog Overflow Shim
+     *
+     * Chromium does not divide viewport units by the CSS zoom factor, so `1vh`
+     * stays one *unscaled* viewport pixel while every CSS length around it is
+     * rendered magnified. A modal <dialog> that caps itself with
+     * `max-height: calc(100vh - …)` — the usual third-party pattern — therefore
+     * ends up laid out zoom-factor times taller than the window at 125%+.
+     * `margin: auto` keeps it centred, so its header, close button included, is
+     * pushed above the window's top edge: only a few pixels of the button stay
+     * on screen, which is why it looks present but almost never receives a
+     * hover or a click. At 100% the same dialog fits, which is why the bug only
+     * shows up once the interface is zoomed.
+     *
+     * The shim measures open modal dialogs in the layout-pixel space the
+     * coordinate engine exposes, marks the ones that really overflow, and lets
+     * the stylesheet cap them with percentages (which do resolve in the zoomed
+     * coordinate space). Dialogs that already fit are never touched, and the
+     * whole shim is inert at 100%.
+     * ========================================================================= */
+    const DIALOG_CLAMP_ATTR = COMPAT_SHIM.dialogClampAttribute;
+    const observedDialogs = new Set();
+    let dialogClampFrame = null;
+    let dialogResizeObserver = null;
+
+    function dialogClampEnabled() {
+      return !SETTINGS || SETTINGS.compatDialogClamp !== false;
+    }
+
+    function openModalDialogs() {
+      if (typeof document === 'undefined') return [];
+      const dialogs = [];
+      for (const element of document.querySelectorAll('dialog[open]')) {
+        if (!element.open) continue;
+        // `:modal` keeps non-modal dialogs (which are laid out inside their DOM
+        // parent and would resolve `100%` against something else) out of scope.
+        let modal = true;
+        try { modal = element.matches(':modal'); } catch (e) {}
+        if (modal) dialogs.push(element);
+      }
+      return dialogs;
+    }
+
+    function releaseDialogClamps() {
+      if (typeof document === 'undefined') return;
+      for (const element of document.querySelectorAll('dialog[' + DIALOG_CLAMP_ATTR + ']')) {
+        element.removeAttribute(DIALOG_CLAMP_ATTR);
+      }
+    }
+
+    function dialogOverflowsViewport(dialog, viewportWidth, viewportHeight) {
+      // Everything here is CSS layout pixels: getBoundingClientRect and
+      // window.innerWidth are patched above, and CSS lengths use that space.
+      const rect = dialog.getBoundingClientRect();
+      if (!(rect.width > 0) && !(rect.height > 0)) return false;
+      return rect.top < -0.5 || rect.left < -0.5
+        || rect.bottom > viewportHeight + 0.5 || rect.right > viewportWidth + 0.5;
+    }
+
+    function watchDialogs(dialogs) {
+      if (dialogResizeObserver === null) return;
+      const active = new Set(dialogs);
+      for (const dialog of [...observedDialogs]) {
+        if (active.has(dialog)) continue;
+        observedDialogs.delete(dialog);
+        try { dialogResizeObserver.unobserve(dialog); } catch (e) {}
+      }
+      for (const dialog of dialogs) {
+        if (observedDialogs.has(dialog)) continue;
+        observedDialogs.add(dialog);
+        try { dialogResizeObserver.observe(dialog); } catch (e) {}
+      }
+    }
+
+    function syncDialogClamps() {
+      dialogClampFrame = null;
+      if (typeof document === 'undefined' || !dialogClampEnabled()) return;
+      const dialogs = openModalDialogs();
+      if (currentScale === 100) {
+        releaseDialogClamps();
+        watchDialogs(dialogs);
+        return;
+      }
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      for (const dialog of dialogs) {
+        // Already clamped dialogs stay clamped: their current rect is the
+        // clamped one, so re-measuring them would oscillate.
+        if (dialog.hasAttribute(DIALOG_CLAMP_ATTR)) continue;
+        if (dialogOverflowsViewport(dialog, viewportWidth, viewportHeight)) {
+          dialog.setAttribute(DIALOG_CLAMP_ATTR, '');
+        }
+      }
+      watchDialogs(dialogs);
+    }
+
+    function scheduleDialogClampSync() {
+      if (typeof document === 'undefined' || !dialogClampEnabled()) return;
+      if (dialogClampFrame !== null) return;
+      dialogClampFrame = typeof requestAnimationFrame === 'function'
+        ? requestAnimationFrame(syncDialogClamps)
+        : setTimeout(syncDialogClamps, 16);
+    }
+
+    function installDialogClampWatchers() {
+      if (typeof document === 'undefined' || !dialogClampEnabled()) return () => {};
+      // `toggle` (capture) covers showModal()/close(); the ResizeObserver covers
+      // content that arrives after the dialog opened, and the resize listener
+      // covers window changes while a dialog stays open.
+      const handleToggle = () => scheduleDialogClampSync();
+      const handleResize = () => scheduleDialogClampSync();
+      document.addEventListener('toggle', handleToggle, true);
+      window.addEventListener('resize', handleResize);
+      if (typeof ResizeObserver !== 'undefined') {
+        dialogResizeObserver = new ResizeObserver(() => scheduleDialogClampSync());
+      }
+      syncDialogClamps();
+      return () => {
+        document.removeEventListener('toggle', handleToggle, true);
+        window.removeEventListener('resize', handleResize);
+        if (dialogResizeObserver !== null) {
+          for (const dialog of observedDialogs) {
+            try { dialogResizeObserver.unobserve(dialog); } catch (e) {}
+          }
+          observedDialogs.clear();
+          dialogResizeObserver.disconnect();
+          dialogResizeObserver = null;
+        }
+        if (dialogClampFrame !== null) {
+          if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(dialogClampFrame);
+          clearTimeout(dialogClampFrame);
+          dialogClampFrame = null;
+        }
+        releaseDialogClamps();
+      };
+    }
+
+    /* =========================================================================
      * SECTION 4: DOM Zoom & HUD Toast Notification
      * ========================================================================= */
     function syncWhaleWidgetPosition() {
@@ -716,10 +882,15 @@ window.__ModuleLoader__.load({
 
     function applyZoomToDOM(scale) {
       if (typeof document === 'undefined') return;
+      const root = document.documentElement;
       if (scale === 100) {
-        document.documentElement.style.zoom = '';
+        root.style.zoom = '';
+        root.style.removeProperty('--dsh-ui-zoom-factor');
       } else {
-        document.documentElement.style.zoom = String(scale / 100);
+        root.style.zoom = String(scale / 100);
+        // Viewport units are not divided by CSS zoom (see the shim above), so
+        // third-party CSS that has to stay zoom-correct can divide by this.
+        root.style.setProperty('--dsh-ui-zoom-factor', String(scale / 100));
       }
       // One window resize reaches every viewport consumer; dispatching a second
       // one used to make each zoom step reflow the app twice.
@@ -785,6 +956,11 @@ window.__ModuleLoader__.load({
       const clamped = Math.min(Math.max(Math.round(targetScale), MIN_SCALE), MAX_SCALE);
       currentScale = clamped;
       applyZoomToDOM(clamped);
+      // Whether a modal dialog overflows is a function of the zoom level, so the
+      // shim is re-evaluated against the new viewport in the same task (no paint
+      // happens in between, so the dialog never flashes at its unclamped size).
+      releaseDialogClamps();
+      syncDialogClamps();
       if (persist) {
         try {
           if (typeof localStorage !== 'undefined') {
@@ -981,6 +1157,7 @@ window.__ModuleLoader__.load({
         ctx.effect(() => {
           installWindowAndRectPatches();
           applyZoomToDOM(currentScale);
+          const disposeDialogClampWatchers = installDialogClampWatchers();
 
           // Workaround for third-party widget button clicks under pointerdown capture
           function handleProtectedPointerDown(e) {
@@ -1045,6 +1222,7 @@ window.__ModuleLoader__.load({
 
           return () => {
             uninstallWindowAndRectPatches();
+            disposeDialogClampWatchers();
             window.removeEventListener('pointerdown', handleProtectedPointerDown, true);
             window.removeEventListener('keydown', handleKeyDown, { capture: true });
             window.removeEventListener('wheel', handleWheel);
@@ -1066,6 +1244,7 @@ window.__ModuleLoader__.load({
               toastEl = null;
             }
             document.documentElement.style.zoom = '';
+            document.documentElement.style.removeProperty('--dsh-ui-zoom-factor');
             syncWhaleWidgetPosition();
           };
         });

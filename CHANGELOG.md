@@ -4,6 +4,33 @@ All notable changes to `dsh-ui-zoom` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.5.1] - 2026-11-24
+
+### Fixed
+
+- Modal `<dialog>` elements from third-party plugins no longer overflow the
+  window under zoom. Chromium does not divide viewport units by the CSS zoom
+  factor, so a dialog that caps itself with `max-height: calc(100vh - …)` is
+  laid out zoom-factor times taller than the window at 125%+; `margin: auto`
+  then pushes its header — close button included — above the window's top edge,
+  leaving a couple of pixels of that button on screen. It looked present, but
+  hover and clicks only landed in that sliver. The shim measures open modal
+  dialogs in the plugin's layout-pixel space, marks the ones that really
+  overflow with `data-dsh-ui-zoom-clamp`, and caps those with percentages
+  (which do resolve against the zoomed viewport). Dialogs that already fit, and
+  every dialog at 100%, keep the author's CSS untouched.
+
+### Added
+
+- `compatDialogClamp` Host config (default `true`) to switch the dialog shim
+  off, alongside the existing `compatOverlayHostHeight`.
+- `--dsh-ui-zoom-factor` custom property on the root element while zoomed, so
+  third-party CSS that has to stay zoom-correct can divide `vh`/`vw` values by
+  it.
+- Regression coverage for the dialog shim: overflow at 150% is fixed, the
+  button is hit-testable again, the 100% layout is untouched, and a control
+  run with the shim disabled reproduces the original overflow.
+
 ## [0.5.0] - 2026-11-23
 
 ### Added

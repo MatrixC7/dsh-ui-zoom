@@ -299,18 +299,64 @@ async function main() {
     await cdp.pressCtrl('=', 'Equal', 187)
     check('shortcut fallback', (await zoomOf(cdp)) === 130)
 
-    // 9. Teardown restores the native APIs, styles and zoom.
-    await openPage(cdp, '?scale=125')
+    // 9. Top-layer dialogs: Chromium keeps viewport units unscaled under CSS
+    //    zoom, so a modal dialog capped with `100vh` is laid out zoom-factor
+    //    times taller than the window and its header — close button included —
+    //    ends up above the top edge. The shim clamps only dialogs it measured as
+    //    overflowing, so the close button stays hoverable and clickable.
+    await openPage(cdp, '?scale=150')
+    await cdp.evaluate('window.__openTallDialog()')
+    await sleep(400)
+    const zoomedDialog = await cdp.evaluate('window.__dialogState()')
+    const clampedDialog = await cdp.evaluate(`(() => {
+      const dialog = document.getElementById('tall-dialog');
+      return {
+        maxHeight: getComputedStyle(dialog).maxHeight,
+        styleRules: document.querySelector('style[data-plugin-css="dsh-ui-zoom/styles"]').textContent.includes('data-dsh-ui-zoom-clamp'),
+        factor: getComputedStyle(document.documentElement).getPropertyValue('--dsh-ui-zoom-factor').trim(),
+      };
+    })()`)
+    check('dialog clamp under zoom',
+      zoomedDialog.open && zoomedDialog.modal === true && zoomedDialog.clamped === true && zoomedDialog.fits === true && zoomedDialog.buttonVisible === true && zoomedDialog.buttonHit === 'tall-close',
+      JSON.stringify({ clamped: zoomedDialog.clamped, fits: zoomedDialog.fits, buttonVisible: zoomedDialog.buttonVisible, hit: zoomedDialog.buttonHit, rect: zoomedDialog.rect, viewport: zoomedDialog.viewport }))
+    check('dialog clamp wired', clampedDialog.styleRules === true && clampedDialog.factor === '1.5' && clampedDialog.maxHeight !== 'none', JSON.stringify(clampedDialog))
+
+    await openPage(cdp, '?scale=100')
+    await cdp.evaluate('window.__openTallDialog()')
+    await sleep(300)
+    const plainDialog = await cdp.evaluate('window.__dialogState()')
+    const plainFactor = await cdp.evaluate(`document.documentElement.style.getPropertyValue('--dsh-ui-zoom-factor')`)
+    check('dialog untouched at 100%',
+      plainDialog.clamped === false && plainDialog.buttonHit === 'tall-close' && plainFactor === '',
+      JSON.stringify({ clamped: plainDialog.clamped, hit: plainDialog.buttonHit, factor: plainFactor }))
+
+    // Control: with the shim switched off the same fixture really does overflow
+    // the window and its close button falls outside it, so the checks above
+    // prove the fix instead of a dialog that never overflows in the first place.
+    await openPage(cdp, '?scale=150&config=' + encodeURIComponent(JSON.stringify({ compatDialogClamp: false })))
+    await cdp.evaluate('window.__openTallDialog()')
+    await sleep(400)
+    const controlDialog = await cdp.evaluate('window.__dialogState()')
+    check('dialog overflow without shim',
+      controlDialog.clamped === false && controlDialog.open === true && controlDialog.fits === false && controlDialog.buttonVisible === false,
+      JSON.stringify({ clamped: controlDialog.clamped, fits: controlDialog.fits, buttonVisible: controlDialog.buttonVisible, rect: controlDialog.rect, viewport: controlDialog.viewport }))
+
+    // 10. Teardown restores the native APIs, styles, zoom and the dialog marker.
+    await openPage(cdp, '?scale=150')
+    await cdp.evaluate('window.__openTallDialog()')
+    await sleep(300)
     const teardown = await cdp.evaluate(`(() => {
       for (const cleanup of window.__pluginCleanups) cleanup();
       return {
         styleCount: document.querySelectorAll('style[data-plugin-css="dsh-ui-zoom/styles"]').length,
         mousePatched: Object.getOwnPropertyDescriptor(MouseEvent.prototype, 'clientX').get.toString().includes('toLayoutPixels'),
         zoom: document.documentElement.style.zoom,
+        factor: document.documentElement.style.getPropertyValue('--dsh-ui-zoom-factor'),
+        dialogClamped: document.getElementById('tall-dialog').hasAttribute('data-dsh-ui-zoom-clamp'),
         toast: document.getElementById('dsh-zoom-hud') === null,
       };
     })()`)
-    check('teardown restores', teardown.styleCount === 0 && teardown.mousePatched === false && teardown.zoom === '' && teardown.toast, JSON.stringify(teardown))
+    check('teardown restores', teardown.styleCount === 0 && teardown.mousePatched === false && teardown.zoom === '' && teardown.factor === '' && teardown.dialogClamped === false && teardown.toast, JSON.stringify(teardown))
 
     const failed = results.filter(result => !result.ok)
     console.log(`\n${results.length - failed.length}/${results.length} checks passed`)

@@ -28,7 +28,7 @@
 - 🧭 **Zoom HUD** — a short-lived percentage toast in the bottom-right corner, announced to assistive technology.
 - 🎯 **Correct coordinates and hit-testing** — one coordinate space fixes portal menus, context menus, splitter drags, image panning, terminal selection and the sidebar's CodeMirror markdown editor caret/selection under CSS `zoom`.
 - 💾 **Persistent and multi-window** — the zoom level survives reloads and restarts; other windows/tabs of the same GUI follow changes.
-- ⚙️ **Deployment config** — default scale, limits, step and the `100vh` compatibility rule are configurable in the profile's `cordis.patch.yml`.
+- ⚙️ **Deployment config** — default scale, limits, step and the `100vh` overlay/modal-dialog compatibility rules are configurable in the profile's `cordis.patch.yml`.
 
 ---
 
@@ -138,6 +138,7 @@ Override the plugin row in the profile's `cordis.patch.yml` (`config` is replace
     maxScale: 250            # highest selectable zoom
     step: 5                  # stepper/wheel step, 5–50
     compatOverlayHostHeight: true  # rewrite 100vh overlay hosts to height:100% (better-sidebar compatibility)
+    compatDialogClamp: true        # pull modal <dialog>s that overflow the window back inside it
 ```
 
 | Field | Default | Description |
@@ -147,6 +148,7 @@ Override the plugin row in the profile's `cordis.patch.yml` (`config` is replace
 | `maxScale` | `250` | Maximum zoom percentage |
 | `step` | `5` | Percentage per stepper/wheel step |
 | `compatOverlayHostHeight` | `true` | Whether to force `[data-dsh-panel-host] { height:100% }` |
+| `compatDialogClamp` | `true` | Whether to pull overflowing modal `<dialog>` elements back inside the window |
 
 Restart DSH after changing these values. On Desktop you can also edit the profile file and restart the app.
 
@@ -158,6 +160,7 @@ Restart DSH after changing these values. On Desktop you can also edit the profil
 - Rects, viewport sizes, pointer events and hit-testing inputs share one CSS layout-pixel space. The following keep native visual-pixel semantics and need conversion before mixing: window scroll offsets, `document.documentElement.clientWidth/clientHeight`, `IntersectionObserverEntry` rects, wheel deltas and `screenX/screenY`. See the notes at the top of [`client.js`](client.js).
 - Hit-testing APIs (`elementFromPoint` / `elementsFromPoint` / `caretRangeFromPoint` / `caretPositionFromPoint`) accept layout coordinates; the plugin converts them to the visual coordinates the browser expects.
 - A third-party plugin that compensates CSS `zoom` on its own can double-convert; disable other zoom/transform plugins first when chasing offsets.
+- **Viewport units do not shrink with the zoom factor.** Chromium never divides `100vh`/`100vw` by CSS `zoom`, so an overlay that limits its height with `max-height: calc(100vh - …)` becomes taller than the window once zoomed in. Modal `<dialog>` elements are pulled back inside the window by `compatDialogClamp`; other fixed overlays that need to compensate can divide by `--dsh-ui-zoom-factor`, which the plugin publishes on the root element (e.g. `calc(100vh / var(--dsh-ui-zoom-factor, 1))`).
 - Extreme zoom levels (e.g. 250%) still reflow the whole page; wheel coalescing only reduces the frequency.
 
 ---
@@ -182,11 +185,14 @@ Make sure the version is ≥ `0.4.1` and no other plugin changes `transform`/`zo
 **Conflict with dsh-better-sidebar's `100vh`.**
 The `compatOverlayHostHeight` rule is enabled by default; set it to `false` in the config and restart if needed.
 
+**A dialog is pushed off the window and its × is nearly impossible to click (e.g. the dsh-cost-meter cost dialog).**
+That is the viewport-unit issue above: the dialog limits itself with `max-height: calc(100vh - …)`, so above 125% it is laid out taller than the window, stays centred, and its header — close button included — ends up above the top edge with only a few pixels still inside the window. Hover never fires and clicks miss. Since `0.5.1`, `compatDialogClamp` pulls such measured-overflow modal dialogs back inside the window (nothing is touched at 100%); set it to `false` and restart to opt out. The upstream fix for the dialog itself is to use `max-height: calc(100% - …)`, which already resolves against the zoomed viewport.
+
 ---
 
 ## 🧪 Development and Regression Tests
 
-The repository ships a dependency-free harness: it starts a static server and drives real Chromium over the DevTools protocol, covering pointer coordinates, drag selection, the 5% ladder, `Ctrl + wheel` coalescing, Host Config, locale switching, shortcut registration/fallback and teardown restoration.
+The repository ships a dependency-free harness: it starts a static server and drives real Chromium over the DevTools protocol, covering pointer coordinates, drag selection, the 5% ladder, `Ctrl + wheel` coalescing, Host Config, locale switching, shortcut registration/fallback, overflowing dialogs and teardown restoration.
 
 ```bash
 # Requires Node.js >= 22; CHROME_PATH points at Chrome/Chromium (set automatically in CI)
