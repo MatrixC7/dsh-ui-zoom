@@ -177,23 +177,44 @@ window.__ModuleLoader__.load({
       }
     };
 
+    let styleEl = null;
+
     function ensureStyles() {
       if (typeof document === 'undefined') return;
-      if (!document.querySelector('style[data-plugin-css="' + CSS_TAG_ID + '"]')) {
-        const style = document.createElement('style');
-        style.dataset.plugin = 'dsh-ui-zoom';
-        style.dataset.pluginCss = CSS_TAG_ID;
-        style.textContent = CSS_TEXT + '\n' + COMPAT_SHIM.generateCssRules();
-        document.head.appendChild(style);
+      const text = CSS_TEXT + '\n' + COMPAT_SHIM.generateCssRules();
+      const existing = document.querySelector('style[data-plugin-css="' + CSS_TAG_ID + '"]');
+      if (existing) {
+        // Re-activation (HMR) must refresh the sheet, not keep a stale copy.
+        if (existing.textContent !== text) existing.textContent = text;
+        styleEl = existing;
+        return;
       }
+      styleEl = document.createElement('style');
+      styleEl.dataset.plugin = 'dsh-ui-zoom';
+      styleEl.dataset.pluginCss = CSS_TAG_ID;
+      styleEl.textContent = text;
+      document.head.appendChild(styleEl);
+    }
+
+    function removeStyles() {
+      if (styleEl !== null && styleEl.parentElement !== null) {
+        styleEl.parentElement.removeChild(styleEl);
+      }
+      styleEl = null;
     }
 
     /* =========================================================================
      * SECTION 3: Scale Ladders, Presets & Reactive State
      * ========================================================================= */
     const STORAGE_KEY = 'dsh.ui.zoom_scale';
+    const MIN_SCALE = 50;
+    const MAX_SCALE = 250;
+    const SCALE_STEP = 5;
     const PRESETS = [80, 90, 100, 110, 125, 150];
-    const LADDER = [50, 60, 70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 120, 125, 135, 150, 175, 200, 225, 250];
+    // Uniform steps across the whole range: the old ladder jumped 135 -> 150
+    // (and 150 -> 175), so the stepper and Ctrl+wheel could not reach 140/145.
+    const LADDER = [];
+    for (let value = MIN_SCALE; value <= MAX_SCALE; value += SCALE_STEP) LADDER.push(value);
 
     function loadSavedScale() {
       if (typeof localStorage === 'undefined') return 100;
@@ -201,7 +222,7 @@ window.__ModuleLoader__.load({
         const raw = localStorage.getItem(STORAGE_KEY);
         if (raw) {
           const parsed = parseInt(raw, 10);
-          if (!isNaN(parsed) && parsed >= 50 && parsed <= 250) {
+          if (!isNaN(parsed) && parsed >= MIN_SCALE && parsed <= MAX_SCALE) {
             return parsed;
           }
         }
@@ -572,10 +593,9 @@ window.__ModuleLoader__.load({
       } else {
         document.documentElement.style.zoom = String(scale / 100);
       }
+      // One window resize reaches every viewport consumer; dispatching a second
+      // one used to make each zoom step reflow the app twice.
       syncWhaleWidgetPosition();
-      try {
-        window.dispatchEvent(new Event('resize'));
-      } catch (e) {}
       if (typeof window !== 'undefined' && window.visualViewport) {
         try {
           window.visualViewport.dispatchEvent(new Event('resize'));
@@ -588,6 +608,10 @@ window.__ModuleLoader__.load({
       if (!toastEl) {
         toastEl = document.createElement('div');
         toastEl.id = 'dsh-zoom-hud';
+        // Announce the new zoom level to assistive technology without stealing focus.
+        toastEl.setAttribute('role', 'status');
+        toastEl.setAttribute('aria-live', 'polite');
+        toastEl.setAttribute('aria-atomic', 'true');
         toastEl.style.cssText = [
           'position: fixed',
           'bottom: 28px',
@@ -628,15 +652,19 @@ window.__ModuleLoader__.load({
     /* =========================================================================
      * SECTION 5: Zoom Action Operators
      * ========================================================================= */
-    function setScale(targetScale, triggerToast = true) {
-      const clamped = Math.min(Math.max(Math.round(targetScale), 50), 250);
+    const REVERSED_LADDER = [...LADDER].reverse();
+
+    function setScale(targetScale, triggerToast = true, persist = true) {
+      const clamped = Math.min(Math.max(Math.round(targetScale), MIN_SCALE), MAX_SCALE);
       currentScale = clamped;
       applyZoomToDOM(clamped);
-      try {
-        if (typeof localStorage !== 'undefined') {
-          localStorage.setItem(STORAGE_KEY, String(clamped));
-        }
-      } catch (e) {}
+      if (persist) {
+        try {
+          if (typeof localStorage !== 'undefined') {
+            localStorage.setItem(STORAGE_KEY, String(clamped));
+          }
+        } catch (e) {}
+      }
       for (const cb of listeners) {
         try { cb(clamped); } catch (e) {}
       }
@@ -645,15 +673,26 @@ window.__ModuleLoader__.load({
       }
     }
 
+    // Adopt a zoom saved by another window (the `storage` event never fires in
+    // the window that wrote the value, so this cannot loop).
+    function adoptStoredScale(rawValue) {
+      if (rawValue === null) return;
+      const parsed = parseInt(rawValue, 10);
+      if (isNaN(parsed) || parsed < MIN_SCALE || parsed > MAX_SCALE) return;
+      if (parsed === currentScale) return;
+      setScale(parsed, false, false);
+    }
+
     function zoomIn() {
+      if (currentScale >= MAX_SCALE) return;
       const next = LADDER.find(v => v > currentScale);
-      setScale(next !== undefined ? next : Math.min(currentScale + 10, 250), true);
+      setScale(next !== undefined ? next : Math.min(currentScale + SCALE_STEP, MAX_SCALE), true);
     }
 
     function zoomOut() {
-      const reversed = [...LADDER].reverse();
-      const prev = reversed.find(v => v < currentScale);
-      setScale(prev !== undefined ? prev : Math.max(currentScale - 10, 50), true);
+      if (currentScale <= MIN_SCALE) return;
+      const prev = REVERSED_LADDER.find(v => v < currentScale);
+      setScale(prev !== undefined ? prev : Math.max(currentScale - SCALE_STEP, MIN_SCALE), true);
     }
 
     function resetZoom() {
@@ -685,7 +724,7 @@ window.__ModuleLoader__.load({
         : 'Shortcuts: Ctrl + = / - to zoom, Ctrl + 0 to reset (Ctrl + mouse wheel supported)';
       const resetLabel = isZh ? '重置 (100%)' : 'Reset (100%)';
 
-      return h('div', { className: 'dsh-ui-zoom-row' },
+      return h('div', { className: 'dsh-ui-zoom-row', role: 'group', 'aria-label': title },
         h('div', { className: 'dsh-ui-zoom-row-text' },
           h('div', { className: 'dsh-ui-zoom-title' }, title),
           h('div', { className: 'dsh-ui-zoom-desc' }, desc),
@@ -700,7 +739,8 @@ window.__ModuleLoader__.load({
                 type: 'button',
                 className: 'dsh-ui-zoom-preset-btn' + (scale === p ? ' active' : ''),
                 onClick: () => setScale(p, false),
-                'aria-label': `${p}%`
+                'aria-label': `${p}%`,
+                'aria-pressed': scale === p
               }, `${p}%`)
             )
           ),
@@ -709,15 +749,15 @@ window.__ModuleLoader__.load({
             h('button', {
               type: 'button',
               className: 'dsh-ui-zoom-stepper-btn',
-              disabled: scale <= 50,
+              disabled: scale <= MIN_SCALE,
               onClick: zoomOut,
               'aria-label': isZh ? '缩小界面' : 'Zoom out'
             }, '−'),
-            h('span', { className: 'dsh-ui-zoom-value' }, `${scale}%`),
+            h('span', { className: 'dsh-ui-zoom-value', 'aria-live': 'polite', 'aria-atomic': 'true' }, `${scale}%`),
             h('button', {
               type: 'button',
               className: 'dsh-ui-zoom-stepper-btn',
-              disabled: scale >= 250,
+              disabled: scale >= MAX_SCALE,
               onClick: zoomIn,
               'aria-label': isZh ? '放大界面' : 'Zoom in'
             }, '+')
@@ -783,11 +823,20 @@ window.__ModuleLoader__.load({
           window.addEventListener('keydown', handleKeyDown, { capture: true });
           window.addEventListener('wheel', handleWheel, { passive: false });
 
+          // Follow zoom changes made in other windows/tabs of the same GUI.
+          function handleStorage(event) {
+            if (event.key !== STORAGE_KEY) return;
+            adoptStoredScale(event.newValue);
+          }
+          window.addEventListener('storage', handleStorage);
+
           return () => {
             uninstallWindowAndRectPatches();
             window.removeEventListener('pointerdown', handleProtectedPointerDown, true);
             window.removeEventListener('keydown', handleKeyDown, { capture: true });
             window.removeEventListener('wheel', handleWheel);
+            window.removeEventListener('storage', handleStorage);
+            removeStyles();
             if (toastTimeout) clearTimeout(toastTimeout);
             if (toastEl && toastEl.parentElement) {
               toastEl.parentElement.removeChild(toastEl);

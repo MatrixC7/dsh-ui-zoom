@@ -14,7 +14,7 @@
 - ⚙️ **无缝融入设置面板**：自动注册至「**设置 -> 通用**」，紧跟在「字号」选项下方。
 - 🎛️ **常用预设与微调**：
   - 常用预设快捷按钮：`80%`、`90%`、`100%`、`110%`、`125%`、`150%`。
-  - 步进器按钮（`−` / `+`）支持平滑微调。
+  - 步进器按钮（`−` / `+`）与 `Ctrl + 鼠标滚轮` 以统一的 5% 为步进（50%–250%）。
   - 一键 **重置 (100%)** 按钮。
 - ⌨️ **全局快捷键支持**（VS Code 习惯）：
   - **`Ctrl` + `=`** 或 **`Ctrl` + `+`**（macOS 上为 `Cmd`）：放大界面。
@@ -24,7 +24,15 @@
 - 🧭 **即时 HUD 提示**：使用快捷键或滚轮调整缩放时，屏幕右下角自动浮现半透明提示框展示当前缩放百分比。
 - 🎯 **完美解决浮层错位（Double-Zoom Fix）**：内置视口坐标空间校准机制，解决 CSS `zoom` 下通过 `createPortal` 挂载的弹出菜单（如左下角用户名菜单、下拉选择器、工具提示等）位置错位或悬空的问题，始终精准贴合。
 - 🖱️ **统一指针坐标系（Pointer Coordinate Calibration）**：鼠标/触控事件的 `clientX/clientY`、`pageX/pageY`、`offsetX/offsetY`、`movementX/movementY` 与 `getBoundingClientRect`、`window.innerWidth` 等全部换算到同一套 CSS 布局坐标。右侧栏 Markdown 编辑模式（CodeMirror）中的光标与选区因此精确落在鼠标位置，拖拽分隔条、框选复制、右键菜单、图片平移等交互也不会再随缩放偏移。
-- 💾 **自动持久化**：缩放配置自动保存在本地缓存中，刷新页面或下次启动时自动恢复。
+- 💾 **自动持久化**：缩放配置自动保存在本地缓存中，刷新页面或下次启动时自动恢复；同一 GUI 的其他窗口/标签页修改缩放时也会自动跟随。
+
+---
+
+## ⚠️ 兼容性与已知限制
+
+- 坐标引擎面向 Chromium（DSH Desktop 的 Electron 内核，以及基于 Chromium 的 Web GUI），其他浏览器未做验证。
+- 为了让脚本读到一致的坐标，插件把矩形、视口尺寸与指针事件统一换算到 CSS 布局像素；窗口滚动量、`document.documentElement.clientWidth/clientHeight`、`IntersectionObserver` 条目矩形、滚轮 delta 与 `screenX/screenY` 按浏览器语义保持视觉像素（详见 `client.js` 顶部说明），与上述坐标混用时需要自行换算。
+- 缩放值保存在 GUI 源的 `localStorage`（键 `dsh.ui.zoom_scale`）；清除站点数据或更换源（例如 Web GUI 使用不同端口）会重置为 100%。
 
 ---
 
@@ -84,7 +92,8 @@ dsh-ui-zoom/
 │   └── en.json           # 英文文案与元数据
 ├── LICENSE               # MIT 开源许可证
 ├── README.md             # 默认中文说明文档
-└── README.en.md          # 英文说明文档
+├── README.en.md          # 英文说明文档
+└── CHANGELOG.md          # 版本变更记录
 ```
 
 ---
