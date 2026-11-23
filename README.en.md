@@ -20,11 +20,14 @@
   - `Ctrl + =` / `Ctrl + +` (or `Cmd` on macOS): Zoom in.
   - `Ctrl + -` (or `Cmd` on macOS): Zoom out.
   - `Ctrl + 0` (or `Cmd` on macOS): Reset zoom to 100%.
-  - `Ctrl + Mouse Wheel`: Zoom in/out smoothly.
+  - `Ctrl + Mouse Wheel`: Zoom in/out (coalesced per animation frame, so continuous scrolling stays smooth).
+  - With the DSH shortcut service available, the three zoom commands appear in **Settings → Shortcuts** where they can be inspected, rebound and conflict-checked; a built-in listener takes over when the service is absent or rejects the registration.
+- 🌐 **Follows the UI language**: the settings row and HUD resolve copy through the DSH Client locale service, so a language switch applies immediately (browser language fallback when the service is absent).
 - 🧭 **Visual HUD Feedback**: Shows a clean, translucent toast indicator in the bottom-right corner when zooming via shortcuts or wheel.
 - 🎯 **Pixel-Perfect Popover Alignment**: Includes an internal coordinate calibration engine so portal popups (such as the bottom-left account menu, dropdowns, and tooltips) remain perfectly anchored without offset or floating gaps at any zoom level.
 - 🖱️ **Unified Pointer Coordinates**: Mouse/touch event coordinates (`clientX/clientY`, `pageX/pageY`, `offsetX/offsetY`, `movementX/movementY`) are normalized into the same CSS layout space as `getBoundingClientRect` and `window.innerWidth`. The caret and selection in the sidebar's CodeMirror markdown editor therefore land exactly under the pointer, and drag handles, context menus and image panning stay aligned at any zoom level.
 - 💾 **Persistent**: Zoom settings are saved in local storage and automatically restored across sessions and page reloads; other windows/tabs of the same GUI follow zoom changes automatically.
+- ⚙️ **Deployment Config**: `defaultScale`, `minScale`, `maxScale`, `step` and `compatOverlayHostHeight` can be set under the plugin `config` in `cordis.patch.yml` (defaults 100/50/250/5%).
 
 ---
 
@@ -32,6 +35,8 @@
 
 - The coordinate engine targets Chromium (the Electron runtime of DSH Desktop and Chromium-based Web GUIs); other browsers are not verified.
 - Scripts see one CSS layout-pixel space for rects, viewport sizes and pointer events. Window scroll offsets, `document.documentElement.clientWidth/clientHeight`, `IntersectionObserverEntry` rects, wheel deltas and `screenX/screenY` keep their native visual-pixel semantics (see the engine notes at the top of `client.js`); convert them yourself before mixing with layout coordinates.
+- Hit-testing APIs (`elementFromPoint` / `elementsFromPoint` / `caretRangeFromPoint` / `caretPositionFromPoint`) accept the same layout coordinates as rects and convert them to the visual coordinates the browser needs; third-party code passes layout coordinates.
+- On Web/Linux, shortcuts are subject to DSH modal restrictions (settings and shortcuts modals are allowed); Desktop native bindings take priority.
 - The zoom level is stored in the GUI origin's `localStorage` (key `dsh.ui.zoom_scale`); clearing site data or changing origin (for example a Web GUI on a different port) resets it to 100%.
 
 ---
@@ -80,28 +85,48 @@ dsh profile install-bundle dsh-ui-zoom
 
 ## 🛠️ Architecture
 
-- **Host Entry (`index.js`)**: Declares the Cordis bundle manifest.
+- **Host Entry (`index.js`)**: Declares the Cordis bundle manifest and the deployment `Config`, and injects the validated settings into the page as `__DSH_UI_ZOOM_CONFIG__`.
 - **Client Module (`client.js`)**:
   - Injects into the `settings.general.item` slot via `@deepseek-ai/cordis`.
-  - Manages global keyboard and mouse wheel listeners.
-  - Normalizes `Element.prototype.getBoundingClientRect`, `Range` rects, viewport sizes and pointer event coordinates into one CSS layout space, ensuring portal menus (like `createPortal(..., document.body)`) stay pixel-perfect and editors (CodeMirror caret/selection) hit-test exactly under the pointer.
+  - Registers zoom commands with the DSH shortcut service when available, with a raw-listener fallback.
+  - Resolves copy through the Client locale service (live language switching) and falls back to the browser language.
+  - Manages global keyboard and mouse wheel listeners, coalescing wheel steps per animation frame.
+  - Normalizes `Element.prototype.getBoundingClientRect`, `Range` rects, viewport sizes, pointer event coordinates and hit-testing inputs into one CSS layout space, ensuring portal menus (like `createPortal(..., document.body)`) stay pixel-perfect and editors (CodeMirror caret/selection) hit-test exactly under the pointer.
 - **Localization (`locale/`)**: Built-in support for English and Simplified Chinese.
 
 ```text
 dsh-ui-zoom/
 ├── package.json          # Package manifest and configuration
 ├── cordis.patch.yml      # DSH Cordis bundle patch
-├── index.js              # Host-side entry
+├── index.js              # Host-side entry (Config + page injection)
 ├── client.js             # Client-side UI, zoom & coordinate correction
 ├── icon.svg              # Vector icon
 ├── locale/
 │   ├── zh.json           # Chinese locale and metadata
 │   └── en.json           # English locale and metadata
+├── test/
+│   ├── page.html         # Dependency-free regression fixture
+│   └── run.mjs           # Chromium/CDP regression runner
+├── .github/workflows/
+│   └── regression.yml    # CI: regression on every push/PR
 ├── LICENSE               # MIT License
 ├── README.md             # Chinese documentation (default)
 ├── README.en.md          # English documentation
 └── CHANGELOG.md          # Version history
 ```
+
+---
+
+## 🧪 Development and Regression Tests
+
+The repository ships a dependency-free harness: it starts a static server and drives real Chromium over the DevTools protocol, covering pointer-coordinate normalization, drag selection, the 5% ladder, `Ctrl + wheel` coalescing, Host Config, locale switching, shortcut registration/fallback and teardown restoration.
+
+```bash
+# Requires Node.js >= 22; CHROME_PATH points at Chrome/Chromium (set automatically in CI)
+CHROME_PATH=/path/to/chrome npm test
+```
+
+`.github/workflows/regression.yml` runs the same harness on every push / PR.
 
 ---
 

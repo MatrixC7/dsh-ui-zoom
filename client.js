@@ -168,6 +168,7 @@ window.__ModuleLoader__.load({
 
       generateCssRules() {
         if (!this.overlayHostSelectors.length) return '';
+        if (SETTINGS && SETTINGS.compatOverlayHostHeight === false) return '';
         return `
           /* Compatibility Shim: normalize fixed overlay hosts with 100vh under CSS zoom */
           ${this.overlayHostSelectors.join(',\n')} {
@@ -204,20 +205,146 @@ window.__ModuleLoader__.load({
     }
 
     /* =========================================================================
+     * SECTION 2b: Client Locale Service Copy
+     * =========================================================================
+     * Visible copy resolves through the Client locale service when the profile
+     * provides one (the Host-backed language preference, live switches), and
+     * falls back to the browser language when the service is absent.
+     */
+    const LOCALE_NS = 'uiZoom';
+    const MESSAGES = {
+      zh: {
+        title: '界面缩放',
+        desc: '等比缩放整个应用界面大小（类似于 VS Code 窗口缩放）。',
+        hint: '快捷键：Ctrl + = / - 缩放，Ctrl + 0 重置（支持 Ctrl + 鼠标滚轮）',
+        reset: '重置 (100%)',
+        zoomIn: '放大界面',
+        zoomOut: '缩小界面',
+        hud: '界面缩放: {percent}%'
+      },
+      en: {
+        title: 'UI Zoom',
+        desc: 'Scales the entire application interface proportionally (similar to VS Code window zoom).',
+        hint: 'Shortcuts: Ctrl + = / - to zoom, Ctrl + 0 to reset (Ctrl + mouse wheel supported)',
+        reset: 'Reset (100%)',
+        zoomIn: 'Zoom in',
+        zoomOut: 'Zoom out',
+        hud: 'UI Zoom: {percent}%'
+      }
+    };
+
+    let localeService = null;
+    let localeBound = null;
+
+    function attachLocaleService(service) {
+      localeService = service && typeof service === 'object' ? service : null;
+      localeBound = null;
+      if (localeService && typeof localeService.bind === 'function') {
+        try {
+          localeBound = localeService.bind(LOCALE_NS);
+        } catch (e) {
+          localeBound = null;
+        }
+      }
+    }
+
+    function readClientService(ctx, name) {
+      if (!ctx) return undefined;
+      try {
+        if (typeof ctx.get === 'function') return ctx.get(name);
+        return ctx[name];
+      } catch (e) {
+        return undefined;
+      }
+    }
+
+    function activeLocaleIsZh() {
+      let active = '';
+      if (localeService && typeof localeService.getSnapshot === 'function') {
+        try {
+          const snapshot = localeService.getSnapshot();
+          active = snapshot && typeof snapshot.active === 'string' ? snapshot.active : '';
+        } catch (e) {}
+      }
+      if (active === '' && typeof document !== 'undefined') {
+        active = document.documentElement.lang || '';
+      }
+      if (active === '' && typeof navigator !== 'undefined') {
+        active = navigator.language || '';
+      }
+      return String(active).toLowerCase().startsWith('zh');
+    }
+
+    function formatCopy(template, params) {
+      if (!params) return template;
+      let text = template;
+      for (const [name, value] of Object.entries(params)) {
+        text = text.split('{' + name + '}').join(String(value));
+      }
+      return text;
+    }
+
+    function translate(key, params) {
+      if (localeBound !== null) {
+        try {
+          const text = localeBound(key, params);
+          if (typeof text === 'string' && text !== '' && text !== key) return text;
+        } catch (e) {}
+      }
+      const dictionary = activeLocaleIsZh() ? MESSAGES.zh : MESSAGES.en;
+      return formatCopy(dictionary[key] || MESSAGES.en[key] || key, params);
+    }
+
+    /* =========================================================================
      * SECTION 3: Scale Ladders, Presets & Reactive State
      * ========================================================================= */
     const STORAGE_KEY = 'dsh.ui.zoom_scale';
-    const MIN_SCALE = 50;
-    const MAX_SCALE = 250;
-    const SCALE_STEP = 5;
-    const PRESETS = [80, 90, 100, 110, 125, 150];
-    // Uniform steps across the whole range: the old ladder jumped 135 -> 150
-    // (and 150 -> 175), so the stepper and Ctrl+wheel could not reach 140/145.
+
+    // Host-provided Config (injected into the page as a global by index.js).
+    // Missing/invalid fields fall back to the defaults, so the plugin still runs
+    // in compositions without the Host half.
+    const DEFAULT_SETTINGS = {
+      defaultScale: 100,
+      minScale: 50,
+      maxScale: 250,
+      step: 5,
+      compatOverlayHostHeight: true
+    };
+
+    function readUiZoomSettings() {
+      const raw = typeof globalThis !== 'undefined' ? globalThis.__DSH_UI_ZOOM_CONFIG__ : undefined;
+      const source = raw && typeof raw === 'object' ? raw : {};
+      const integer = (value, fallback, low, high) => {
+        const number = typeof value === 'number' ? value : parseInt(value, 10);
+        if (!Number.isFinite(number)) return fallback;
+        return Math.min(Math.max(Math.round(number), low), high);
+      };
+      let minScale = integer(source.minScale, DEFAULT_SETTINGS.minScale, 25, 400);
+      let maxScale = integer(source.maxScale, DEFAULT_SETTINGS.maxScale, minScale + 5, 500);
+      if (!(minScale < maxScale)) {
+        minScale = DEFAULT_SETTINGS.minScale;
+        maxScale = DEFAULT_SETTINGS.maxScale;
+      }
+      const step = integer(source.step, DEFAULT_SETTINGS.step, 5, 50);
+      const defaultScale = integer(source.defaultScale, DEFAULT_SETTINGS.defaultScale, minScale, maxScale);
+      const compatOverlayHostHeight = source.compatOverlayHostHeight === undefined
+        ? DEFAULT_SETTINGS.compatOverlayHostHeight
+        : source.compatOverlayHostHeight !== false;
+      return { defaultScale, minScale, maxScale, step, compatOverlayHostHeight };
+    }
+
+    const SETTINGS = readUiZoomSettings();
+    const MIN_SCALE = SETTINGS.minScale;
+    const MAX_SCALE = SETTINGS.maxScale;
+    const SCALE_STEP = SETTINGS.step;
+    const PRESETS = [80, 90, 100, 110, 125, 150].filter(scale => scale >= MIN_SCALE && scale <= MAX_SCALE);
+    // Uniform steps across the whole range: a coarse ladder skipped values such
+    // as 140/145, so the stepper and Ctrl+wheel could not reach them.
     const LADDER = [];
     for (let value = MIN_SCALE; value <= MAX_SCALE; value += SCALE_STEP) LADDER.push(value);
 
     function loadSavedScale() {
-      if (typeof localStorage === 'undefined') return 100;
+      if (typeof localStorage === 'undefined') return SETTINGS.defaultScale;
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (raw) {
@@ -227,7 +354,7 @@ window.__ModuleLoader__.load({
           }
         }
       } catch (e) {}
-      return 100;
+      return SETTINGS.defaultScale;
     }
 
     let currentScale = loadSavedScale();
@@ -490,34 +617,35 @@ window.__ModuleLoader__.load({
       }
 
       // 4. document.elementFromPoint & friends
-      // The DOM hit-testing APIs take visual (physical) pixels natively; callers in
-      // this layout-coordinate world pass CSS layout pixels, so convert them back.
+      // The DOM hit-testing APIs take visual (physical) pixels natively; callers
+      // in this layout-coordinate world pass CSS layout pixels, so scale the
+      // point back up to visual pixels before hit-testing.
       if (origElementFromPoint) {
         Document.prototype.elementFromPoint = function(x, y) {
           if (currentScale === 100) return origElementFromPoint.call(this, x, y);
           const factor = currentScale / 100;
-          return origElementFromPoint.call(this, x / factor, y / factor) || origElementFromPoint.call(this, x, y);
+          return origElementFromPoint.call(this, x * factor, y * factor) || origElementFromPoint.call(this, x, y);
         };
       }
       if (origElementsFromPoint) {
         Document.prototype.elementsFromPoint = function(x, y) {
           if (currentScale === 100) return origElementsFromPoint.call(this, x, y);
           const factor = currentScale / 100;
-          return origElementsFromPoint.call(this, x / factor, y / factor);
+          return origElementsFromPoint.call(this, x * factor, y * factor);
         };
       }
       if (origCaretRangeFromPoint) {
         Document.prototype.caretRangeFromPoint = function(x, y) {
           if (currentScale === 100) return origCaretRangeFromPoint.call(this, x, y);
           const factor = currentScale / 100;
-          return origCaretRangeFromPoint.call(this, x / factor, y / factor);
+          return origCaretRangeFromPoint.call(this, x * factor, y * factor);
         };
       }
       if (origCaretPositionFromPoint) {
         Document.prototype.caretPositionFromPoint = function(x, y) {
           if (currentScale === 100) return origCaretPositionFromPoint.call(this, x, y);
           const factor = currentScale / 100;
-          return origCaretPositionFromPoint.call(this, x / factor, y / factor);
+          return origCaretPositionFromPoint.call(this, x * factor, y * factor);
         };
       }
 
@@ -635,8 +763,7 @@ window.__ModuleLoader__.load({
         ].join(';');
         document.body.appendChild(toastEl);
       }
-      const isZh = (document.documentElement.lang || navigator.language || '').toLowerCase().startsWith('zh');
-      toastEl.textContent = (isZh ? '界面缩放: ' : 'UI Zoom: ') + scale + '%';
+      toastEl.textContent = translate('hud', { percent: scale });
       toastEl.style.opacity = '1';
       toastEl.style.transform = 'translateY(0)';
 
@@ -696,14 +823,78 @@ window.__ModuleLoader__.load({
     }
 
     function resetZoom() {
-      setScale(100, true);
+      setScale(Math.min(Math.max(100, MIN_SCALE), MAX_SCALE), true);
+    }
+
+    // Native shortcut integration: when the Host exposes ctx.shortcuts, the
+    // zoom actions become visible/rebindable commands in Settings → Shortcuts
+    // and participate in conflict detection. A raw key listener remains the
+    // fallback for compositions (or rejected registrations) where the service
+    // is unavailable.
+    const SHORTCUT_PROFILES = ['desktop:macos', 'desktop:windows', 'desktop:linux', 'web:macos', 'web:windows', 'web:linux'];
+    const SHORTCUT_REGIONS = ['page', 'editable', 'terminal'];
+    const SHORTCUT_MODALS = ['settings', 'shortcuts'];
+
+    function shortcutDefaults(code) {
+      const defaults = {};
+      for (const profile of SHORTCUT_PROFILES) {
+        defaults[profile] = { code, modifiers: ['primary'] };
+      }
+      return defaults;
+    }
+
+    function installShortcutCommands(service) {
+      if (!service || typeof service.register !== 'function') return null;
+      const definitions = [
+        { id: 'dsh-ui-zoom.zoom-in', key: 'zoomIn', code: 'Equal', run: zoomIn },
+        { id: 'dsh-ui-zoom.zoom-out', key: 'zoomOut', code: 'Minus', run: zoomOut },
+        { id: 'dsh-ui-zoom.zoom-reset', key: 'reset', code: 'Digit0', run: resetZoom }
+      ];
+      const disposers = [];
+      try {
+        for (const definition of definitions) {
+          disposers.push(service.register({
+            id: definition.id,
+            label: () => translate(definition.key),
+            aliases: [definition.id],
+            defaults: shortcutDefaults(definition.code),
+            regions: SHORTCUT_REGIONS,
+            modals: SHORTCUT_MODALS,
+            resolve: () => ({ status: 'handled', run: definition.run })
+          }));
+        }
+      } catch (e) {
+        // A conflicting default (or an older service shape) must not take the
+        // plugin down: roll the partial registration back and use the listener.
+        for (const dispose of disposers.reverse()) {
+          try { dispose(); } catch (error) {}
+        }
+        return null;
+      }
+      return () => {
+        for (const dispose of disposers) {
+          try { dispose(); } catch (e) {}
+        }
+      };
     }
 
     /* =========================================================================
      * SECTION 6: React UI Settings Component
      * ========================================================================= */
+    function useLocaleRevision() {
+      const [revision, setRevision] = React.useState(0);
+      React.useEffect(() => {
+        if (localeService === null || typeof localeService.subscribe !== 'function') return undefined;
+        return localeService.subscribe(() => setRevision(value => value + 1));
+      }, []);
+      return revision;
+    }
+
     function ZoomSettingsRow() {
       const [scale, setScaleState] = React.useState(currentScale);
+      // Re-render when the active locale switches (dictionary registration or a
+      // language change bumps the locale revision).
+      useLocaleRevision();
 
       React.useEffect(() => {
         const update = (newScale) => setScaleState(newScale);
@@ -713,16 +904,10 @@ window.__ModuleLoader__.load({
         };
       }, []);
 
-      const isZh = (typeof document !== 'undefined' && (document.documentElement.lang || navigator.language || '').toLowerCase().startsWith('zh'));
-
-      const title = isZh ? '界面缩放' : 'UI Zoom';
-      const desc = isZh
-        ? '等比缩放整个应用界面大小（类似于 VS Code 窗口缩放）。'
-        : 'Scale the entire application interface proportionally (similar to VS Code window zoom).';
-      const hint = isZh
-        ? '快捷键：Ctrl + = / - 缩放，Ctrl + 0 重置（支持 Ctrl + 鼠标滚轮）'
-        : 'Shortcuts: Ctrl + = / - to zoom, Ctrl + 0 to reset (Ctrl + mouse wheel supported)';
-      const resetLabel = isZh ? '重置 (100%)' : 'Reset (100%)';
+      const title = translate('title');
+      const desc = translate('desc');
+      const hint = translate('hint');
+      const resetLabel = translate('reset');
 
       return h('div', { className: 'dsh-ui-zoom-row', role: 'group', 'aria-label': title },
         h('div', { className: 'dsh-ui-zoom-row-text' },
@@ -751,7 +936,7 @@ window.__ModuleLoader__.load({
               className: 'dsh-ui-zoom-stepper-btn',
               disabled: scale <= MIN_SCALE,
               onClick: zoomOut,
-              'aria-label': isZh ? '缩小界面' : 'Zoom out'
+              'aria-label': translate('zoomOut')
             }, '−'),
             h('span', { className: 'dsh-ui-zoom-value', 'aria-live': 'polite', 'aria-atomic': 'true' }, `${scale}%`),
             h('button', {
@@ -759,7 +944,7 @@ window.__ModuleLoader__.load({
               className: 'dsh-ui-zoom-stepper-btn',
               disabled: scale >= MAX_SCALE,
               onClick: zoomIn,
-              'aria-label': isZh ? '放大界面' : 'Zoom in'
+              'aria-label': translate('zoomIn')
             }, '+')
           ),
           // Reset button
@@ -782,6 +967,16 @@ window.__ModuleLoader__.load({
       apply(ctx) {
         ensureStyles();
 
+        // 0. Client locale: the HUD and the settings row resolve copy through the
+        // shared service when the composition provides it (live language switch),
+        // and fall back to the browser language otherwise.
+        const locale = readClientService(ctx, 'locale');
+        attachLocaleService(locale);
+        ctx.effect(() => {
+          if (!locale || typeof locale.register !== 'function') return;
+          return locale.register(LOCALE_NS, { zh: MESSAGES.zh, en: MESSAGES.en });
+        }, 'ui-zoom: dictionaries');
+
         // 1. Install rect & viewport patches, restore zoom and listen to keyboard / wheel shortcuts
         ctx.effect(() => {
           installWindowAndRectPatches();
@@ -795,7 +990,13 @@ window.__ModuleLoader__.load({
           }
           window.addEventListener('pointerdown', handleProtectedPointerDown, true);
 
+          // Prefer the Host command service. If it is unavailable at apply time
+          // (or its registration is rejected), the capture listener below keeps
+          // the shortcuts working.
+          let disposeShortcuts = installShortcutCommands(readClientService(ctx, 'shortcuts'));
+
           function handleKeyDown(e) {
+            if (disposeShortcuts !== null) return;
             if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
             if (e.key === '=' || e.key === '+' || e.code === 'Equal' || e.code === 'NumpadAdd') {
               e.preventDefault();
@@ -809,15 +1010,27 @@ window.__ModuleLoader__.load({
             }
           }
 
+          // Ctrl+wheel is coalesced to at most one ladder step per animation
+          // frame: a trackpad emits dozens of wheel events per second, and each
+          // step re-lays out the entire application.
+          let wheelFrame = null;
+          let wheelDirection = 0;
+          function flushWheelStep() {
+            wheelFrame = null;
+            const direction = wheelDirection;
+            wheelDirection = 0;
+            if (direction < 0) zoomIn();
+            else if (direction > 0) zoomOut();
+          }
           function handleWheel(e) {
-            if (e.ctrlKey || e.metaKey) {
-              e.preventDefault();
-              if (e.deltaY < 0) {
-                zoomIn();
-              } else if (e.deltaY > 0) {
-                zoomOut();
-              }
-            }
+            if (!(e.ctrlKey || e.metaKey)) return;
+            e.preventDefault();
+            if (e.deltaY === 0) return;
+            wheelDirection = e.deltaY < 0 ? -1 : 1;
+            if (wheelFrame !== null) return;
+            wheelFrame = typeof requestAnimationFrame === 'function'
+              ? requestAnimationFrame(flushWheelStep)
+              : setTimeout(flushWheelStep, 16);
           }
 
           window.addEventListener('keydown', handleKeyDown, { capture: true });
@@ -836,6 +1049,16 @@ window.__ModuleLoader__.load({
             window.removeEventListener('keydown', handleKeyDown, { capture: true });
             window.removeEventListener('wheel', handleWheel);
             window.removeEventListener('storage', handleStorage);
+            if (disposeShortcuts !== null) {
+              const dispose = disposeShortcuts;
+              disposeShortcuts = null;
+              dispose();
+            }
+            if (wheelFrame !== null) {
+              if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(wheelFrame);
+              clearTimeout(wheelFrame);
+              wheelFrame = null;
+            }
             removeStyles();
             if (toastTimeout) clearTimeout(toastTimeout);
             if (toastEl && toastEl.parentElement) {

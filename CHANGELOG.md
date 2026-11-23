@@ -4,6 +4,35 @@ All notable changes to `dsh-ui-zoom` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] - 2026-11-23
+
+### Added
+
+- Client locale service integration: the settings row and HUD register a
+  `uiZoom` dictionary and resolve copy through `ctx.locale`, so a language
+  switch applies immediately; the browser language remains the fallback.
+- Host `Config` (`defaultScale`, `minScale`, `maxScale`, `step`,
+  `compatOverlayHostHeight`) declared in `index.js` and injected into the page,
+  replacing the hard-coded ladder limits.
+- Zoom commands register with `ctx.shortcuts` when the service is available,
+  making them visible/rebindable in Settings → Shortcuts with conflict checks;
+  registration failures or a missing service fall back to the raw listener.
+- Dependency-free regression harness (`test/`) driving real Chromium over the
+  DevTools protocol, plus a GitHub Actions workflow.
+- `Ctrl + wheel` steps are coalesced to one ladder step per animation frame.
+
+### Changed
+
+- The compatibility rule for `100vh` overlay hosts can be disabled through
+  `compatOverlayHostHeight`.
+
+### Fixed
+
+- `elementFromPoint`, `elementsFromPoint`, `caretRangeFromPoint` and
+  `caretPositionFromPoint` now scale layout-pixel inputs up to the visual
+  pixels the DOM hit-testing APIs expect; the previous conversion divided in
+  the wrong direction.
+
 ## [0.4.2] - 2026-11-23
 
 ### Fixed

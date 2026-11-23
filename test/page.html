@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>dsh-ui-zoom regression harness</title>
+<style>
+  html, body { margin: 0; height: 100%; }
+  #editable {
+    position: absolute;
+    left: 40px;
+    top: 60px;
+    width: 460px;
+    font: 16px/1.5 monospace;
+    white-space: pre;
+    outline: none;
+  }
+  #probe {
+    position: absolute;
+    left: 0;
+    top: 0;
+    visibility: hidden;
+    white-space: pre;
+    font: 16px monospace;
+  }
+</style>
+<script>
+  // Minimal host shims: the real client.js runs unchanged against a fake module
+  // loader, a fake React, and optional locale/shortcuts service doubles.
+  window.__errors = [];
+  window.addEventListener('error', event => window.__errors.push(String(event.message)));
+  window.addEventListener('unhandledrejection', event => window.__errors.push(String(event.reason)));
+  const params = new URLSearchParams(location.search);
+  const scale = params.get('scale') || '125';
+  if (params.get('config')) {
+    try { window.__DSH_UI_ZOOM_CONFIG__ = JSON.parse(params.get('config')); } catch (error) { window.__errors.push('config: ' + error.message); }
+  }
+  if (params.get('nosave') === '1') {
+    try { localStorage.removeItem('dsh.ui.zoom_scale'); } catch (error) {}
+  } else {
+    try { localStorage.setItem('dsh.ui.zoom_scale', scale); } catch (error) {}
+  }
+
+  const fakeReact = {
+    createElement: (...args) => ({ args }),
+    useState: value => [typeof value === 'function' ? value() : value, () => {}],
+    useEffect: () => {},
+  };
+
+  const localeEnabled = params.get('locale') === '1';
+  let localeTest = null;
+  if (localeEnabled) {
+    const state = { active: params.get('lang') || 'zh', dicts: new Map(), listeners: new Set(), revision: 0 };
+    const service = {
+      getSnapshot() { return { active: state.active, revision: state.revision, locales: [] }; },
+      subscribe(listener) { state.listeners.add(listener); return () => { state.listeners.delete(listener); }; },
+      register(namespace, dictionaries) {
+        state.dicts.set(namespace, dictionaries);
+        state.revision += 1;
+        for (const listener of [...state.listeners]) listener();
+        return () => { state.dicts.delete(namespace); };
+      },
+      bind(namespace) {
+        return (key, values) => {
+          const languages = state.dicts.get(namespace) || {};
+          const active = languages[state.active] || languages.en || {};
+          let text = active[key];
+          if (text === undefined) text = (languages.en || {})[key];
+          if (text === undefined) return key;
+          if (values) for (const [name, value] of Object.entries(values)) text = text.split('{' + name + '}').join(String(value));
+          return text;
+        };
+      },
+    };
+    localeTest = {
+      service,
+      state,
+      setActive(language) {
+        state.active = language;
+        state.revision += 1;
+        for (const listener of [...state.listeners]) listener();
+      },
+      registrations: () => state.dicts.size,
+    };
+    window.__localeTest = localeTest;
+  }
+
+  const shortcutsMode = params.get('shortcuts');
+  let shortcutService = null;
+  if (shortcutsMode) {
+    const registrations = [];
+    let disposed = 0;
+    let sequence = 0;
+    shortcutService = {
+      register(command) {
+        sequence += 1;
+        if (shortcutsMode === 'throws' || (shortcutsMode === 'throws-second' && sequence === 2)) {
+          throw new Error('conflicting binding');
+        }
+        registrations.push(command);
+        return () => { disposed += 1; };
+      },
+    };
+    window.__shortcutsTest = {
+      registrations,
+      disposed: () => disposed,
+      run(id) {
+        const command = registrations.find(item => item.id === id);
+        if (!command) throw new Error('missing command ' + id);
+        const resolved = command.resolve({ region: 'page', modal: null, target: null });
+        if (resolved.status === 'handled') resolved.run();
+        return resolved.status;
+      },
+    };
+  }
+
+  window.__ModuleLoader__ = {
+    load({ factory }) {
+      window.__plugin = factory(name => {
+        if (name === 'react') return fakeReact;
+        throw new Error('unexpected require: ' + name);
+      });
+      window.__pluginApplied = false;
+      const cleanups = [];
+      const ctx = {
+        effect(callback) {
+          const cleanup = callback();
+          if (typeof cleanup === 'function') cleanups.push(cleanup);
+        },
+        slots: { inject() {}, register() { return () => {}; } },
+        get(name) {
+          if (name === 'locale') return localeTest === null ? undefined : localeTest.service;
+          if (name === 'shortcuts') return shortcutService;
+          return undefined;
+        },
+        locale: localeTest === null ? undefined : localeTest.service,
+      };
+      try {
+        window.__plugin.apply(ctx);
+        window.__pluginApplied = true;
+        window.__pluginCleanups = cleanups;
+      } catch (error) {
+        window.__errors.push('apply: ' + String((error && error.stack) || error));
+      }
+    },
+  };
+</script>
+<script src="/plugin/client.js"></script>
+</head>
+<body>
+<div id="editable" contenteditable="true"></div>
+<div id="probe"></div>
+<script>
+  const TEXT = 'abcdefghij'.repeat(20);
+  const editable = document.getElementById('editable');
+  editable.textContent = TEXT;
+  window.__text = TEXT;
+  window.__measureChar = () => {
+    const probe = document.getElementById('probe');
+    probe.textContent = 'a';
+    const width = probe.getBoundingClientRect().width;
+    probe.textContent = '';
+    return width;
+  };
+  window.__hit = null;
+  editable.addEventListener('mousedown', event => {
+    const rect = editable.getBoundingClientRect();
+    const range = document.caretRangeFromPoint(event.clientX, event.clientY);
+    window.__hit = {
+      clientX: event.clientX,
+      clientY: event.clientY,
+      rectLeft: rect.left,
+      rectTop: rect.top,
+      caretOffset: range === null ? null : range.startOffset,
+      charWidth: window.__measureChar(),
+      zoom: getComputedStyle(document.documentElement).zoom,
+    };
+  }, true);
+  window.__pageReady = true;
+</script>
+</body>
+</html>
