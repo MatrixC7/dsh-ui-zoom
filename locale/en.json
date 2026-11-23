@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "UI Zoom",
-    "description": "Scales the entire DSH user interface proportionally (like VS Code window zoom) to 110%, 125%, 150%, etc."
+    "description": "Scales the entire DSH interface proportionally (50%–250%, 5% steps, presets, shortcuts and Ctrl+wheel) and fixes popover, drag and markdown-editor caret coordinates under zoom."
   }
 }

@@ -33,6 +33,15 @@ All notable changes to `dsh-ui-zoom` are documented here. The format follows
   pixels the DOM hit-testing APIs expect; the previous conversion divided in
   the wrong direction.
 
+### Documentation
+
+- Rewrote the Chinese and English README: real installation commands
+  (`dsh plugin --profile … add`), the Desktop Plugin Manager flow, upgrade and
+  removal, the config reference, a FAQ, and a warning that the npm package of
+  the same name belongs to a different project.
+- Refreshed the plugin metadata descriptions in `locale/zh.json` and
+  `locale/en.json`.
+
 ## [0.4.2] - 2026-11-23
 
 ### Fixed

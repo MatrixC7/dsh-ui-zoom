@@ -2,134 +2,241 @@
 
 [English](README.en.md) | [中文](README.md)
 
-> A UI Zoom / Window Scaling plugin for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness). Scale the entire application interface proportionally (80%, 110%, 125%, 150%, etc.) just like in VS Code.
+[![regression](https://github.com/MatrixC7/dsh-ui-zoom/actions/workflows/regression.yml/badge.svg)](https://github.com/MatrixC7/dsh-ui-zoom/actions/workflows/regression.yml)
 
-![UI Zoom Preview](icon.svg)
+> A global UI zoom plugin for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness). Like VS Code window zoom, it scales the whole interface — sidebars, composer, buttons, chat cards, spacing, icons and fonts — from 50% to 250%.
+
+![UI Zoom icon](icon.svg)
 
 ---
 
 ## ✨ Features
 
-- 🔍 **Proportional UI Zooming**: Unlike simple font-size scaling, this scales the entire UI — sidebars, inputs, buttons, chat cards, spacing, icons, and fonts proportionally.
-- ⚙️ **Native Settings Integration**: Automatically adds a "UI Scale" (`界面缩放`) section under **Settings -> General**, right below the font size option.
-- 🎛️ **Quick Presets & Fine-tuning**:
-  - One-click presets: `80%`, `90%`, `100%`, `110%`, `125%`, `150%`.
-  - Stepper controls (`−` / `+`) and `Ctrl + Mouse Wheel` adjust in uniform 5% steps (50%–250%).
-  - One-click **Reset (100%)** button.
-- ⌨️ **Global Keyboard Shortcuts** (VS Code style):
-  - `Ctrl + =` / `Ctrl + +` (or `Cmd` on macOS): Zoom in.
-  - `Ctrl + -` (or `Cmd` on macOS): Zoom out.
-  - `Ctrl + 0` (or `Cmd` on macOS): Reset zoom to 100%.
-  - `Ctrl + Mouse Wheel`: Zoom in/out (coalesced per animation frame, so continuous scrolling stays smooth).
-  - With the DSH shortcut service available, the three zoom commands appear in **Settings → Shortcuts** where they can be inspected, rebound and conflict-checked; a built-in listener takes over when the service is absent or rejects the registration.
-- 🌐 **Follows the UI language**: the settings row and HUD resolve copy through the DSH Client locale service, so a language switch applies immediately (browser language fallback when the service is absent).
-- 🧭 **Visual HUD Feedback**: Shows a clean, translucent toast indicator in the bottom-right corner when zooming via shortcuts or wheel.
-- 🎯 **Pixel-Perfect Popover Alignment**: Includes an internal coordinate calibration engine so portal popups (such as the bottom-left account menu, dropdowns, and tooltips) remain perfectly anchored without offset or floating gaps at any zoom level.
-- 🖱️ **Unified Pointer Coordinates**: Mouse/touch event coordinates (`clientX/clientY`, `pageX/pageY`, `offsetX/offsetY`, `movementX/movementY`) are normalized into the same CSS layout space as `getBoundingClientRect` and `window.innerWidth`. The caret and selection in the sidebar's CodeMirror markdown editor therefore land exactly under the pointer, and drag handles, context menus and image panning stay aligned at any zoom level.
-- 💾 **Persistent**: Zoom settings are saved in local storage and automatically restored across sessions and page reloads; other windows/tabs of the same GUI follow zoom changes automatically.
-- ⚙️ **Deployment Config**: `defaultScale`, `minScale`, `maxScale`, `step` and `compatOverlayHostHeight` can be set under the plugin `config` in `cordis.patch.yml` (defaults 100/50/250/5%).
-
----
-
-## ⚠️ Compatibility and Known Limits
-
-- The coordinate engine targets Chromium (the Electron runtime of DSH Desktop and Chromium-based Web GUIs); other browsers are not verified.
-- Scripts see one CSS layout-pixel space for rects, viewport sizes and pointer events. Window scroll offsets, `document.documentElement.clientWidth/clientHeight`, `IntersectionObserverEntry` rects, wheel deltas and `screenX/screenY` keep their native visual-pixel semantics (see the engine notes at the top of `client.js`); convert them yourself before mixing with layout coordinates.
-- Hit-testing APIs (`elementFromPoint` / `elementsFromPoint` / `caretRangeFromPoint` / `caretPositionFromPoint`) accept the same layout coordinates as rects and convert them to the visual coordinates the browser needs; third-party code passes layout coordinates.
-- On Web/Linux, shortcuts are subject to DSH modal restrictions (settings and shortcuts modals are allowed); Desktop native bindings take priority.
-- The zoom level is stored in the GUI origin's `localStorage` (key `dsh.ui.zoom_scale`); clearing site data or changing origin (for example a Web GUI on a different port) resets it to 100%.
+- 🔍 **Proportional UI zooming** — scales every interface element, not just the font size.
+- ⚙️ **Native settings row** — registered under **Settings → General → UI Zoom**, right below the font size option.
+- 🎛️ **Presets and 5% fine-tuning**
+  - Presets: `80%`, `90%`, `100%`, `110%`, `125%`, `150%`.
+  - Stepper buttons (`−` / `+`) and `Ctrl + wheel` use one uniform 5% ladder (50%–250%), so values between 135 and 150 are reachable too.
+  - One-click reset to 100%.
+- ⌨️ **VS Code-style shortcuts**
+  - `Ctrl + =` / `Ctrl + +` (`Cmd` on macOS): zoom in.
+  - `Ctrl + -` (`Cmd` on macOS): zoom out.
+  - `Ctrl + 0` (`Cmd` on macOS): reset to 100%.
+  - `Ctrl + wheel`: continuous zoom, coalesced per animation frame.
+  - When the DSH shortcut service is available, the three zoom commands appear in **Settings → Shortcuts** and can be inspected, rebound and conflict-checked; a built-in listener takes over when the service is absent or rejects the registration.
+- 🌐 **Follows the UI language** — the settings row and HUD resolve copy through the DSH Client locale service, so language switches apply immediately (browser-language fallback).
+- 🧭 **Zoom HUD** — a short-lived percentage toast in the bottom-right corner, announced to assistive technology.
+- 🎯 **Correct coordinates and hit-testing** — one coordinate space fixes portal menus, context menus, splitter drags, image panning, terminal selection and the sidebar's CodeMirror markdown editor caret/selection under CSS `zoom`.
+- 💾 **Persistent and multi-window** — the zoom level survives reloads and restarts; other windows/tabs of the same GUI follow changes.
+- ⚙️ **Deployment config** — default scale, limits, step and the `100vh` compatibility rule are configurable in the profile's `cordis.patch.yml`.
 
 ---
 
 ## 📦 Installation
 
-### Option 1: Install from Local Clone (Recommended for Developers)
+### Requirements
 
-1. Clone this repository into your workspace:
-   ```bash
-   git clone https://github.com/<your-username>/dsh-ui-zoom.git
+- DeepSeek Harness (Desktop or Web CLI). This repository is verified on DSH `0.2.2-rc.5`.
+- The Desktop profile is named `desktop` and is owned by the app: install/remove through **Settings → Plugins**, not the CLI.
+- Web/custom profiles use the `dsh` CLI. If it is not installed, replace `dsh` with `npx -y @deepseek-ai/dsh`.
+- Linking a local checkout needs Node.js and pnpm.
+
+### Option 1: DSH Desktop (recommended)
+
+1. Open **Settings → Plugins** (Plugin Manager).
+2. Choose **Install / Install from GitHub**.
+3. Enter the repository:
+   ```text
+   https://github.com/MatrixC7/dsh-ui-zoom
    ```
-
-2. Install the bundle into your active DSH profile using DSH Plugin Manager or the CLI:
-   ```bash
-   dsh profile install-bundle /path/to/dsh-ui-zoom
+   or the Git spec:
+   ```text
+   github:MatrixC7/dsh-ui-zoom
    ```
-   *Or ask your DSH assistant in the chat:*
-   > "Please install the dsh-ui-zoom plugin from the workspace"
+4. Restart DSH (the Host half must reload), then refresh the window.
 
-3. Refresh your DSH window (`Ctrl + R` or `F5`).
+You can also ask the assistant in chat:
 
-### Option 2: Install via npm (If Published)
+> Install the dsh-ui-zoom plugin from GitHub (`MatrixC7/dsh-ui-zoom`) or from the workspace.
 
-Once published to npm (e.g. `dsh-ui-zoom`):
+### Option 2: CLI (Web / custom profiles)
+
 ```bash
-dsh profile install-bundle dsh-ui-zoom
+# From GitHub (replace "web" with your profile name)
+dsh plugin --profile web add github:MatrixC7/dsh-ui-zoom
+
+# Local checkout: link: keeps source edits visible immediately
+dsh plugin --profile web add "link:/absolute/path/to/dsh-ui-zoom"
+
+# Or pack a tarball first (replace <version> with the npm pack output)
+npm pack
+dsh plugin --profile web add ./dsh-ui-zoom-<version>.tgz
 ```
+
+Restart the profile afterwards:
+
+```bash
+dsh --profile web
+```
+
+### Do not install by npm package name
+
+This repository is distributed through **GitHub / a local directory**; it is not published to npm. The unrelated npm package named `dsh-ui-zoom` belongs to a different project, so do not run `dsh plugin add dsh-ui-zoom` — it would install that other plugin.
+
+### Upgrade and removal
+
+```bash
+# List installed entries
+dsh plugin --profile web list
+
+# Upgrade: re-add the latest GitHub version, or update in Plugin Manager
+dsh plugin --profile web add github:MatrixC7/dsh-ui-zoom
+
+# Remove
+dsh plugin --profile web remove dsh-ui-zoom
+```
+
+On Desktop, upgrade, disable or remove from **Settings → Plugins**. Restart DSH after upgrading or removing.
 
 ---
 
 ## 🚀 Usage
 
-### Method 1: Settings Panel
-1. Click the **Settings (设置)** icon in the sidebar.
-2. Go to **General (通用)**.
-3. Locate **UI Scale (界面缩放)** to pick a preset or adjust with `+` / `−`.
+### Settings panel
 
-### Method 2: Shortcuts
-- Press `Ctrl + =` to scale up.
-- Press `Ctrl + -` to scale down.
-- Press `Ctrl + 0` to restore default.
-- Hold `Ctrl` and scroll your mouse wheel.
+1. Open **Settings** from the bottom-left gear.
+2. Go to **General**.
+3. Find **UI Zoom**: pick a preset, fine-tune with `−` / `+`, or click **Reset (100%)**.
+
+### Shortcuts
+
+- `Ctrl + =` zoom in, `Ctrl + -` zoom out, `Ctrl + 0` reset (`Cmd` on macOS).
+- `Ctrl + wheel` for continuous zoom, at most one step per frame.
+- When the DSH shortcut service is exposed, rebind the three commands under **Settings → Shortcuts**. On Web/Linux some modals intercept shortcuts per DSH rules; Desktop native bindings take priority.
+
+### When changes take effect
+
+- Client-only changes: refresh the window (`Ctrl + R` / `F5`).
+- Host Config changes or plugin upgrades: restart DSH.
+- The zoom level lives in the GUI origin's `localStorage` (key `dsh.ui.zoom_scale`); clearing site data or changing the Web GUI port resets it to 100%.
 
 ---
 
-## 🛠️ Architecture
+## ⚙️ Configuration
 
-- **Host Entry (`index.js`)**: Declares the Cordis bundle manifest and the deployment `Config`, and injects the validated settings into the page as `__DSH_UI_ZOOM_CONFIG__`.
-- **Client Module (`client.js`)**:
-  - Injects into the `settings.general.item` slot via `@deepseek-ai/cordis`.
-  - Registers zoom commands with the DSH shortcut service when available, with a raw-listener fallback.
-  - Resolves copy through the Client locale service (live language switching) and falls back to the browser language.
-  - Manages global keyboard and mouse wheel listeners, coalescing wheel steps per animation frame.
-  - Normalizes `Element.prototype.getBoundingClientRect`, `Range` rects, viewport sizes, pointer event coordinates and hit-testing inputs into one CSS layout space, ensuring portal menus (like `createPortal(..., document.body)`) stay pixel-perfect and editors (CodeMirror caret/selection) hit-test exactly under the pointer.
-- **Localization (`locale/`)**: Built-in support for English and Simplified Chinese.
+Override the plugin row in the profile's `cordis.patch.yml` (`config` is replaced wholesale; omitted fields use their defaults):
 
-```text
-dsh-ui-zoom/
-├── package.json          # Package manifest and configuration
-├── cordis.patch.yml      # DSH Cordis bundle patch
-├── index.js              # Host-side entry (Config + page injection)
-├── client.js             # Client-side UI, zoom & coordinate correction
-├── icon.svg              # Vector icon
-├── locale/
-│   ├── zh.json           # Chinese locale and metadata
-│   └── en.json           # English locale and metadata
-├── test/
-│   ├── page.html         # Dependency-free regression fixture
-│   └── run.mjs           # Chromium/CDP regression runner
-├── .github/workflows/
-│   └── regression.yml    # CI: regression on every push/PR
-├── LICENSE               # MIT License
-├── README.md             # Chinese documentation (default)
-├── README.en.md          # English documentation
-└── CHANGELOG.md          # Version history
+- Web/custom profile: `~/.dsh/profiles/<profile>/cordis.patch.yml`
+- Desktop profile: `%USERPROFILE%\.dsh\profiles\desktop\cordis.patch.yml` (prefer the Plugin Manager's plugin-config entry; restart the app after a manual edit)
+
+```yaml
+- id: ui-zoom
+  name: dsh-ui-zoom
+  config:
+    defaultScale: 100        # initial zoom when nothing is stored
+    minScale: 50             # lowest selectable zoom
+    maxScale: 250            # highest selectable zoom
+    step: 5                  # stepper/wheel step, 5–50
+    compatOverlayHostHeight: true  # rewrite 100vh overlay hosts to height:100% (better-sidebar compatibility)
 ```
+
+| Field | Default | Description |
+|---|---|---|
+| `defaultScale` | `100` | Initial zoom percentage |
+| `minScale` | `50` | Minimum zoom percentage |
+| `maxScale` | `250` | Maximum zoom percentage |
+| `step` | `5` | Percentage per stepper/wheel step |
+| `compatOverlayHostHeight` | `true` | Whether to force `[data-dsh-panel-host] { height:100% }` |
+
+Restart DSH after changing these values. On Desktop you can also edit the profile file and restart the app.
+
+---
+
+## ⚠️ Compatibility and Known Limits
+
+- The coordinate engine targets **Chromium** (the Electron runtime of DSH Desktop and Chromium-based Web GUIs); other browsers are not verified.
+- Rects, viewport sizes, pointer events and hit-testing inputs share one CSS layout-pixel space. The following keep native visual-pixel semantics and need conversion before mixing: window scroll offsets, `document.documentElement.clientWidth/clientHeight`, `IntersectionObserverEntry` rects, wheel deltas and `screenX/screenY`. See the notes at the top of [`client.js`](client.js).
+- Hit-testing APIs (`elementFromPoint` / `elementsFromPoint` / `caretRangeFromPoint` / `caretPositionFromPoint`) accept layout coordinates; the plugin converts them to the visual coordinates the browser expects.
+- A third-party plugin that compensates CSS `zoom` on its own can double-convert; disable other zoom/transform plugins first when chasing offsets.
+- Extreme zoom levels (e.g. 250%) still reflow the whole page; wheel coalescing only reduces the frequency.
+
+---
+
+## ❓ FAQ
+
+**The UI Zoom row is missing.**
+Make sure the plugin is enabled (the Plugin Manager row is `enabled` with a healthy `fiberPhase`), then restart DSH. The client bundle is only loaded after a refresh.
+
+**Shortcuts do nothing.**
+Check **Settings → Shortcuts** for the three Zoom commands and any rebinding/conflicts. On Web/Linux some modals block shortcuts; Desktop native bindings take priority. If the shortcut service is not exposed, the built-in listener handles the keys.
+
+**Changed `config` has no effect.**
+Host Config is injected into the page when DSH starts; restart DSH. A window refresh alone is not enough.
+
+**Zoom resets to 100% after every restart.**
+Check whether you are on a Web GUI whose port changes, or whether site data was cleared. The Desktop origin is stable.
+
+**The markdown editor caret is still offset.**
+Make sure the version is ≥ `0.4.1` and no other plugin changes `transform`/`zoom`. Since 0.4.1, event and rect coordinates share one space.
+
+**Conflict with dsh-better-sidebar's `100vh`.**
+The `compatOverlayHostHeight` rule is enabled by default; set it to `false` in the config and restart if needed.
 
 ---
 
 ## 🧪 Development and Regression Tests
 
-The repository ships a dependency-free harness: it starts a static server and drives real Chromium over the DevTools protocol, covering pointer-coordinate normalization, drag selection, the 5% ladder, `Ctrl + wheel` coalescing, Host Config, locale switching, shortcut registration/fallback and teardown restoration.
+The repository ships a dependency-free harness: it starts a static server and drives real Chromium over the DevTools protocol, covering pointer coordinates, drag selection, the 5% ladder, `Ctrl + wheel` coalescing, Host Config, locale switching, shortcut registration/fallback and teardown restoration.
 
 ```bash
 # Requires Node.js >= 22; CHROME_PATH points at Chrome/Chromium (set automatically in CI)
 CHROME_PATH=/path/to/chrome npm test
 ```
 
-`.github/workflows/regression.yml` runs the same harness on every push / PR.
+[`.github/workflows/regression.yml`](.github/workflows/regression.yml) runs the same harness on every push / PR.
+
+### Local development
+
+```bash
+git clone https://github.com/MatrixC7/dsh-ui-zoom.git
+cd dsh-ui-zoom
+
+# Install into the Web profile (use the checkout's absolute path; on Windows: "link:E:/Download/dsh-ui-zoom")
+dsh plugin --profile web add "link:/absolute/path/to/dsh-ui-zoom"
+
+# Refresh the window after client.js edits; restart DSH after index.js edits
+CHROME_PATH=/path/to/chrome npm test
+```
 
 ---
 
-## 📄 License
+## 🛠️ Project Structure
 
-[MIT License](LICENSE)
+```text
+dsh-ui-zoom/
+├── package.json          # Manifest, version and published file list
+├── cordis.patch.yml      # DSH Cordis bundle patch
+├── index.js              # Host entry (Config + page injection)
+├── client.js             # Client UI, DOM zoom, coordinate engine and shortcuts
+├── icon.svg              # Vector icon
+├── locale/
+│   ├── zh.json           # Chinese plugin metadata
+│   └── en.json           # English plugin metadata
+├── test/
+│   ├── page.html         # Dependency-free regression fixture
+│   └── run.mjs           # Chromium/CDP regression runner
+├── .github/workflows/
+│   └── regression.yml    # CI: regression on push/PR
+├── CHANGELOG.md          # Version history
+├── README.md             # Chinese documentation (default)
+├── README.en.md          # English documentation
+└── LICENSE               # MIT
+```
+
+---
+
+## 📄 Changelog and License
+
+- See [CHANGELOG.md](CHANGELOG.md) for version history.
+- Report issues at [GitHub Issues](https://github.com/MatrixC7/dsh-ui-zoom/issues).
+- [MIT License](LICENSE).
