@@ -161,6 +161,7 @@ dsh plugin --profile web remove dsh-ui-zoom
 - 命中测试 API（`elementFromPoint` / `elementsFromPoint` / `caretRangeFromPoint` / `caretPositionFromPoint`）接收布局坐标，由插件换算成浏览器需要的视觉坐标。
 - 第三方插件若自行对 CSS `zoom` 做补偿，可能与本插件重复换算；遇到偏移请先停用其他缩放/transform 类插件排查。
 - **视口单位不随缩放缩小**：Chromium 不会把 `100vh`/`100vw` 除以 CSS `zoom`，所以用 `max-height: calc(100vh - …)` 限制高度的浮层在放大后会比窗口还大。模态 `<dialog>` 由 `compatDialogClamp` 收进窗口（见下条）；其他固定浮层如需自行补偿，可除以本插件在根元素上提供的 `--dsh-ui-zoom-factor`（例如 `calc(100vh / var(--dsh-ui-zoom-factor, 1))`）。
+- **第三方浮层还可以直接"托管"给本插件**：给一个固定在视口上的元素（`position: fixed`，或 top layer 里的元素）加上 `data-dsh-ui-zoom-clamp` 属性即可——本插件的样式表会把它的 `max-height` / `max-width` 限制成缩放后的视口尺寸（用百分比表示，在缩放坐标系里就是"视口大小"），超出部分仍由元素自己的滚动容器处理。这等价于上面手工改 CSS，但不用改插件源码。
 - 极端缩放（如 250%）下整页重排仍然存在，滚轮合帧只能降低频率。
 
 ---
@@ -187,6 +188,9 @@ Host Config 在 DSH 启动时注入页面，必须重启 DSH；仅刷新窗口�
 
 **弹窗被顶出窗口，右上角 × 点不到？（例如 dsh-cost-meter 的费用统计弹窗）**
 这是「视口单位不随缩放缩小」导致的：弹窗用 `max-height: calc(100vh - …)` 限制高度，放大到 125% 以上时它会被排成比窗口高出一截，居中显示后标题栏连同 × 被顶到窗口上沿之外，只剩几个像素留在窗口里，所以鼠标移上去没有悬停效果、按下去也没反应。`0.5.1` 起由 `compatDialogClamp` 自动把这类「实测超出窗口」的模态弹窗收进窗口（100% 缩放时完全不动它）；如需关闭，把该配置改为 `false` 并重启。第三方弹窗自身改成 `max-height: calc(100% - …)` 也能根治。
+
+**装了 dsh-better-sidebar 后控制台一直刷 "panel host geometry mismatch"？**
+这是两个插件的判定口径不一致，不是界面坏了。`dsh-better-sidebar` 的面板宿主用 `height:100dvh`，并且会自检「宿主矩形高度 == `window.innerHeight × 计算出的 zoom`」；本插件的 `compatOverlayHostHeight` 规则会把宿主改成 `height:100%`（否则它在放大后会比窗口高一截，面板底部跑到窗口外），于是自检的期望值对不上，侧栏进入降级分支（`data-dsh-panel-host-degraded`，视觉上等价，但会保留一个每帧的 rAF 同步循环并打印一次告警）。要消掉这条告警，可以把这个兼容规则设为 `false`（宿主会重新变成 oversize），或者等上游把自检改成用探针元素量视口，而不是 `innerHeight × zoom`。功能本身不受影响。
 
 ---
 

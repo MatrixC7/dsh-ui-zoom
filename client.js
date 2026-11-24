@@ -192,8 +192,10 @@ window.__ModuleLoader__.load({
         }
         if (!SETTINGS || SETTINGS.compatDialogClamp !== false) {
           rules.push(`
-          /* Compatibility Shim: keep overflowing modal dialogs inside the zoomed viewport */
-          dialog[${this.dialogClampAttribute}] {
+          /* Compatibility Shim: keep overflowing overlays inside the zoomed viewport.
+             The plugin marks modal dialogs itself; a third-party overlay can opt in
+             by adding the attribute to a top-layer/fixed element it sizes with vh. */
+          [${this.dialogClampAttribute}] {
             max-height: calc(100% - var(--dsh-frame-chrome-top, 0px) - 32px) !important;
             max-width: calc(100% - 32px) !important;
           }
@@ -1223,6 +1225,8 @@ window.__ModuleLoader__.load({
           function handleKeyDown(e) {
             if (disposeShortcuts !== null) return;
             if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+            // Never steal a key from an active IME composition.
+            if (e.isComposing || e.keyCode === 229) return;
             if (e.key === '=' || e.key === '+' || e.code === 'Equal' || e.code === 'NumpadAdd') {
               e.preventDefault();
               zoomIn();

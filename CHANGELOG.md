@@ -4,6 +4,32 @@ All notable changes to `dsh-ui-zoom` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.5.3] - 2026-11-24
+
+### Added
+
+- The viewport-overflow cap is now available to third-party overlays, not just
+  modal dialogs: an element that anchors itself to the viewport and carries
+  `data-dsh-ui-zoom-clamp` gets `max-height`/`max-width` capped to the zoomed
+  viewport by the plugin stylesheet. This is the zero-code way for a plugin
+  sized with `100vh` (see `dsh-harness-remote`'s route panel) to stay inside the
+  window; no change to that plugin's source is needed.
+
+### Fixed
+
+- The fallback keyboard listener no longer intercepts `Ctrl/Cmd + =`, `-` and
+  `0` during an IME composition (`isComposing` or keyCode 229), where those keys
+  belong to the input method.
+
+### Documentation
+
+- README FAQ documents the `dsh-better-sidebar` interaction: its panel-host
+  geometry self-check compares the patched rect against `innerHeight × zoom`,
+  which no longer holds once the compatibility rule caps the host to the window.
+  The visual result stays correct, but the sidebar logs a "panel host geometry
+  mismatch" warning and keeps a degraded rAF sync loop; the upstream fix is to
+  compare against a probe element instead of `innerHeight × zoom`.
+
 ## [0.5.2] - 2026-11-24
 
 ### Fixed

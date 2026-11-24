@@ -161,6 +161,7 @@ Restart DSH after changing these values. On Desktop you can also edit the profil
 - Hit-testing APIs (`elementFromPoint` / `elementsFromPoint` / `caretRangeFromPoint` / `caretPositionFromPoint`) accept layout coordinates; the plugin converts them to the visual coordinates the browser expects.
 - A third-party plugin that compensates CSS `zoom` on its own can double-convert; disable other zoom/transform plugins first when chasing offsets.
 - **Viewport units do not shrink with the zoom factor.** Chromium never divides `100vh`/`100vw` by CSS `zoom`, so an overlay that limits its height with `max-height: calc(100vh - …)` becomes taller than the window once zoomed in. Modal `<dialog>` elements are pulled back inside the window by `compatDialogClamp`; other fixed overlays that need to compensate can divide by `--dsh-ui-zoom-factor`, which the plugin publishes on the root element (e.g. `calc(100vh / var(--dsh-ui-zoom-factor, 1))`).
+- **Third-party overlays can also delegate the cap to this plugin**: add `data-dsh-ui-zoom-clamp` to a viewport-anchored element (`position: fixed`, or anything in the top layer) and the plugin's stylesheet limits its `max-height` / `max-width` to the zoomed viewport (expressed as percentages, which resolve in the zoomed coordinate space); the element keeps scrolling its own overflow. That is the same as editing the CSS above, without patching the plugin.
 - Extreme zoom levels (e.g. 250%) still reflow the whole page; wheel coalescing only reduces the frequency.
 
 ---
@@ -187,6 +188,9 @@ The `compatOverlayHostHeight` rule is enabled by default; set it to `false` in t
 
 **A dialog is pushed off the window and its × is nearly impossible to click (e.g. the dsh-cost-meter cost dialog).**
 That is the viewport-unit issue above: the dialog limits itself with `max-height: calc(100vh - …)`, so above 125% it is laid out taller than the window, stays centred, and its header — close button included — ends up above the top edge with only a few pixels still inside the window. Hover never fires and clicks miss. Since `0.5.1`, `compatDialogClamp` pulls such measured-overflow modal dialogs back inside the window (nothing is touched at 100%); set it to `false` and restart to opt out. The upstream fix for the dialog itself is to use `max-height: calc(100% - …)`, which already resolves against the zoomed viewport.
+
+**With dsh-better-sidebar installed the console keeps printing "panel host geometry mismatch".**
+Two plugins measuring the same box with different rulers, and the UI is fine. `dsh-better-sidebar` sizes its panel host with `height:100dvh` and self-checks "host rect height == `window.innerHeight × computed zoom`"; the `compatOverlayHostHeight` rule here rewrites that host to `height:100%` — without it the host is taller than the window once zoomed and the panel's bottom lands off-screen — so the self-check no longer matches and the sidebar falls into its degraded branch (`data-dsh-panel-host-degraded`, visually equivalent, but it keeps a per-frame rAF sync loop and logs one warning). Set the compatibility rule to `false` to silence it (the host becomes oversized again), or wait for the upstream fix: compare against a probe element instead of `innerHeight × zoom`. Functionality is unaffected.
 
 ---
 
