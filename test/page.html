@@ -47,6 +47,20 @@
   }
   #tall-body { overflow: auto; min-height: 0; padding: 20px 24px; }
   #tall-close { min-width: 32px; min-height: 30px; }
+  /* Fixed overlay capped with viewport units — the route-panel/alert pattern.
+     Under CSS zoom the cap is zoom× the window, so it runs past the bottom. */
+  #vh-overlay {
+    position: fixed;
+    top: 48px;
+    right: 28px;
+    width: min(360px, 90vw);
+    max-height: calc(100vh - 72px);
+    overflow: auto;
+    display: none;
+    background: #ffffff;
+    border: 1px solid #cccccc;
+  }
+  #vh-overlay.on { display: block; }
 </style>
 <script>
   // Minimal host shims: the real client.js runs unchanged against a fake module
@@ -189,6 +203,7 @@
   </header>
   <div id="tall-body"></div>
 </dialog>
+<div id="vh-overlay"><div id="vh-overlay-body"></div></div>
 <script>
   const TEXT = 'abcdefghij'.repeat(20);
   const editable = document.getElementById('editable');
@@ -227,6 +242,29 @@
   }
   window.__openTallDialog = () => { tallDialog.showModal(); };
   window.__closeTallDialog = () => { if (tallDialog.open) tallDialog.close(); };
+  // --- Fixed overlay fixture (viewport-unit cap under CSS zoom) --------------
+  const vhOverlay = document.getElementById('vh-overlay');
+  const vhOverlayBody = document.getElementById('vh-overlay-body');
+  for (let index = 0; index < 120; index += 1) {
+    const paragraph = document.createElement('p');
+    paragraph.textContent = 'route ' + index + ' — 远程路由 / route detail sample text';
+    vhOverlayBody.appendChild(paragraph);
+  }
+  window.__openVhOverlay = () => {
+    vhOverlay.classList.add('on');
+  };
+  window.__vhOverlayState = () => {
+    const native = window.__native;
+    const rect = native.rect.call(vhOverlay);
+    const viewport = { width: native.innerWidth.call(window), height: native.innerHeight.call(window) };
+    return {
+      open: vhOverlay.classList.contains('on'),
+      clamped: vhOverlay.hasAttribute('data-dsh-ui-zoom-clamp'),
+      rect: { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right, height: rect.height },
+      viewport,
+      fits: rect.top >= -0.5 && rect.left >= -0.5 && rect.bottom <= viewport.height + 0.5 && rect.right <= viewport.width + 0.5,
+    };
+  };
   // What the browser is about to paint for the very first frame of the dialog:
   // requestAnimationFrame callbacks run before style/layout/paint of that frame,
   // so a clamp applied here in time means the dialog never flashes at its

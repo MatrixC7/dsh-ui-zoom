@@ -346,7 +346,31 @@ async function main() {
       controlDialog.clamped === false && controlDialog.open === true && controlDialog.fits === false && controlDialog.buttonVisible === false,
       JSON.stringify({ clamped: controlDialog.clamped, fits: controlDialog.fits, buttonVisible: controlDialog.buttonVisible, rect: controlDialog.rect, viewport: controlDialog.viewport }))
 
-    // 10. Teardown restores the native APIs, styles, zoom and the dialog marker.
+    // 10. Fixed overlays capped with viewport units (route panels, alerts): the
+    //     shim caps only the ones that overflow, so their own scroller stays
+    //     reachable instead of running past the bottom edge.
+    const openOverlay = async (pageQuery) => {
+      await openPage(cdp, pageQuery)
+      await cdp.evaluate('window.__openVhOverlay()')
+      // A gesture is what triggers the overlay pass in the real app.
+      await cdp.evaluate(`document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }))`)
+      await sleep(400)
+      return cdp.evaluate('window.__vhOverlayState()')
+    }
+    const zoomedOverlay = await openOverlay('?scale=150')
+    check('vh overlay clamped under zoom',
+      zoomedOverlay.open === true && zoomedOverlay.clamped === true && zoomedOverlay.fits === true,
+      JSON.stringify(zoomedOverlay))
+    const plainOverlay = await openOverlay('?scale=100')
+    check('vh overlay untouched at 100%',
+      plainOverlay.clamped === false && plainOverlay.fits === true,
+      JSON.stringify(plainOverlay))
+    const controlOverlay = await openOverlay('?scale=150&config=' + encodeURIComponent(JSON.stringify({ compatOverflowClamp: false })))
+    check('vh overlay overflows without shim',
+      controlOverlay.clamped === false && controlOverlay.fits === false,
+      JSON.stringify(controlOverlay))
+
+    // 11. Teardown restores the native APIs, styles, zoom and the dialog marker.
     await openPage(cdp, '?scale=150')
     await cdp.evaluate('window.__openTallDialog()')
     await sleep(300)

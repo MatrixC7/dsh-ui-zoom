@@ -17,6 +17,9 @@ import z from '@deepseek-ai/schemastery'
  *   (dsh-better-sidebar compatibility).
  * - `compatDialogClamp`: keep modal `<dialog>` elements that overflow the
  *   window inside it under zoom (third-party dialogs sized with `100vh`).
+ * - `compatOverflowClamp`: do the same for fixed-position overlays sized with
+ *   viewport units (route panels, alerts and guides that would otherwise run
+ *   past the window and clip their own scroll container).
  */
 export const Config = z.object({
   defaultScale: z.natural().min(50).max(250).default(100),
@@ -25,6 +28,7 @@ export const Config = z.object({
   step: z.natural().min(5).max(50).default(5),
   compatOverlayHostHeight: z.boolean().default(true),
   compatDialogClamp: z.boolean().default(true),
+  compatOverflowClamp: z.boolean().default(true),
 })
 
 /** The page injection needs the web server. */

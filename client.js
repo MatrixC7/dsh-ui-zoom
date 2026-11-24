@@ -190,12 +190,16 @@ window.__ModuleLoader__.load({
           }
         `);
         }
-        if (!SETTINGS || SETTINGS.compatDialogClamp !== false) {
+        if (!SETTINGS || SETTINGS.compatDialogClamp !== false || SETTINGS.compatOverflowClamp !== false) {
           rules.push(`
           /* Compatibility Shim: keep overflowing overlays inside the zoomed viewport.
-             The plugin marks modal dialogs itself; a third-party overlay can opt in
-             by adding the attribute to a top-layer/fixed element it sizes with vh. */
+             The plugin marks modal dialogs and vh-sized fixed overlays itself; a third
+             party can opt in by adding the attribute to a fixed/top-layer element. */
           [${this.dialogClampAttribute}] {
+            max-height: calc(100% - 64px) !important;
+            max-width: calc(100% - 64px) !important;
+          }
+          dialog[${this.dialogClampAttribute}] {
             max-height: calc(100% - var(--dsh-frame-chrome-top, 0px) - 32px) !important;
             max-width: calc(100% - 32px) !important;
           }
@@ -336,7 +340,8 @@ window.__ModuleLoader__.load({
       maxScale: 250,
       step: 5,
       compatOverlayHostHeight: true,
-      compatDialogClamp: true
+      compatDialogClamp: true,
+      compatOverflowClamp: true
     };
 
     function readUiZoomSettings() {
@@ -361,7 +366,10 @@ window.__ModuleLoader__.load({
       const compatDialogClamp = source.compatDialogClamp === undefined
         ? DEFAULT_SETTINGS.compatDialogClamp
         : source.compatDialogClamp !== false;
-      return { defaultScale, minScale, maxScale, step, compatOverlayHostHeight, compatDialogClamp };
+      const compatOverflowClamp = source.compatOverflowClamp === undefined
+        ? DEFAULT_SETTINGS.compatOverflowClamp
+        : source.compatOverflowClamp !== false;
+      return { defaultScale, minScale, maxScale, step, compatOverlayHostHeight, compatDialogClamp, compatOverflowClamp };
     }
 
     const SETTINGS = readUiZoomSettings();
@@ -735,30 +743,39 @@ window.__ModuleLoader__.load({
     }
 
     /* =========================================================================
-     * SECTION 3b: Top-layer Dialog Overflow Shim
+     * SECTION 3b: Viewport-Unit Overflow Shim (modal dialogs & fixed overlays)
      *
      * Chromium does not divide viewport units by the CSS zoom factor, so `1vh`
      * stays one *unscaled* viewport pixel while every CSS length around it is
-     * rendered magnified. A modal <dialog> that caps itself with
+     * rendered magnified. Anything that caps itself with
      * `max-height: calc(100vh - …)` — the usual third-party pattern — therefore
      * ends up laid out zoom-factor times taller than the window at 125%+.
-     * `margin: auto` keeps it centred, so its header, close button included, is
-     * pushed above the window's top edge: only a few pixels of the button stay
-     * on screen, which is why it looks present but almost never receives a
-     * hover or a click. At 100% the same dialog fits, which is why the bug only
-     * shows up once the interface is zoomed.
      *
-     * The shim measures open modal dialogs in the layout-pixel space the
-     * coordinate engine exposes, marks the ones that really overflow, and lets
-     * the stylesheet cap them with percentages (which do resolve in the zoomed
-     * coordinate space). Dialogs that already fit are never touched, and the
-     * whole shim is inert at 100%.
+     * Two shapes hit users:
+     * 1. Modal <dialog>s stay centred through `margin: auto`, so the header (and
+     *    the close button with it) is pushed above the window's top edge: only a
+     *    few pixels of the button remain on screen, which is why it looks present
+     *    but almost never receives a hover or a click.
+     * 2. Fixed-position overlays (route panels, alerts, guides) simply run past
+     *    the bottom edge, and whatever they would scroll to is clipped away.
+     *
+     * The shim measures candidates in the layout-pixel space the coordinate
+     * engine exposes, marks only the ones that really overflow, and lets the
+     * stylesheet cap them with percentages (which do resolve in the zoomed
+     * coordinate space). Elements that already fit, and every element at 100%,
+     * are never touched.
      * ========================================================================= */
     const DIALOG_CLAMP_ATTR = COMPAT_SHIM.dialogClampAttribute;
     const observedDialogs = new Set();
     let dialogClampFrame = null;
     let dialogResizeObserver = null;
+    let viewportUnitSelectors = null;
+    let viewportUnitSheetCount = -1;
+    let lastOverlayPass = 0;
     const origShowModal = typeof HTMLDialogElement !== 'undefined' ? HTMLDialogElement.prototype.showModal : null;
+    // Box properties whose viewport units make an overlay zoom-fragile.
+    const VIEWPORT_UNIT_PROPERTIES = ['height', 'max-height', 'min-height', 'width', 'max-width', 'min-width', 'inset', 'top', 'right', 'bottom', 'left'];
+    const VIEWPORT_UNIT_VALUE = /(?:^|[^\w.-])\d*\.?\d+(?:d|s|l)?v(?:h|w)\b/;
 
     function dialogClampEnabled() {
       return !SETTINGS || SETTINGS.compatDialogClamp !== false;
@@ -780,15 +797,15 @@ window.__ModuleLoader__.load({
 
     function releaseDialogClamps() {
       if (typeof document === 'undefined') return;
-      for (const element of document.querySelectorAll('dialog[' + DIALOG_CLAMP_ATTR + ']')) {
+      for (const element of document.querySelectorAll('[' + DIALOG_CLAMP_ATTR + ']')) {
         element.removeAttribute(DIALOG_CLAMP_ATTR);
       }
     }
 
-    function dialogOverflowsViewport(dialog, viewportWidth, viewportHeight) {
+    function overflowsViewport(element, viewportWidth, viewportHeight) {
       // Everything here is CSS layout pixels: getBoundingClientRect and
       // window.innerWidth are patched above, and CSS lengths use that space.
-      const rect = dialog.getBoundingClientRect();
+      const rect = element.getBoundingClientRect();
       if (!(rect.width > 0) && !(rect.height > 0)) return false;
       return rect.top < -0.5 || rect.left < -0.5
         || rect.bottom > viewportHeight + 0.5 || rect.right > viewportWidth + 0.5;
@@ -822,6 +839,7 @@ window.__ModuleLoader__.load({
       }
       for (const dialog of dialogs) clampDialogNow(dialog);
       watchDialogs(dialogs);
+      clampViewportUnitOverlays();
     }
 
     /**
@@ -838,8 +856,104 @@ window.__ModuleLoader__.load({
       // Already clamped dialogs stay clamped: their current rect is the clamped
       // one, so re-measuring them would oscillate.
       if (dialog.hasAttribute(DIALOG_CLAMP_ATTR)) return;
-      if (!dialogOverflowsViewport(dialog, window.innerWidth, window.innerHeight)) return;
+      if (!overflowsViewport(dialog, window.innerWidth, window.innerHeight)) return;
       dialog.setAttribute(DIALOG_CLAMP_ATTR, '');
+    }
+
+    // --- Fixed overlays sized from viewport units -----------------------------
+
+    function overlayClampEnabled() {
+      return !SETTINGS || SETTINGS.compatOverflowClamp !== false;
+    }
+
+    /**
+     * Selectors of author rules that size a box from viewport units.
+     *
+     * Chromium keeps `1vh` at one *unscaled* viewport pixel, so those rules are
+     * the only place the quirk can bite; scanning the stylesheets once and
+     * caching the result keeps the per-gesture check cheap. The cache is dropped
+     * when a plugin injects another sheet, and cross-origin sheets are skipped.
+     */
+    function viewportUnitRules() {
+      if (typeof document === 'undefined') return [];
+      const sheetCount = document.styleSheets.length;
+      if (viewportUnitSelectors !== null && sheetCount === viewportUnitSheetCount) return viewportUnitSelectors;
+      const selectors = new Set();
+      let visited = 0;
+      const visit = (rules) => {
+        if (!rules) return;
+        for (const rule of rules) {
+          if (visited > 20000) return;
+          visited += 1;
+          // A style rule may also carry nested rules (`rule.cssRules`), so the
+          // declaration block is inspected here and the children after it.
+          const style = rule.style;
+          if (style && typeof rule.selectorText === 'string' && rule.selectorText !== '') {
+            for (const property of VIEWPORT_UNIT_PROPERTIES) {
+              const value = style.getPropertyValue(property);
+              if (value !== '' && VIEWPORT_UNIT_VALUE.test(value)) {
+                selectors.add(rule.selectorText);
+                break;
+              }
+            }
+          }
+          if (rule.cssRules) visit(rule.cssRules);
+        }
+      };
+      for (const sheet of Array.from(document.styleSheets)) {
+        let rules = null;
+        try { rules = sheet.cssRules; } catch (e) { continue; }
+        try { visit(rules); } catch (e) {}
+      }
+      viewportUnitSelectors = [...selectors].filter(selector => !/:host\b/.test(selector));
+      viewportUnitSheetCount = sheetCount;
+      return viewportUnitSelectors;
+    }
+
+    function isViewportAnchored(element) {
+      // `100%` only means "the zoom-corrected viewport" for boxes whose
+      // containing block is the initial containing block.
+      if (element.tagName === 'DIALOG') {
+        try { if (element.open && element.matches(':modal')) return true; } catch (e) {}
+      }
+      try { if (element.matches(':popover-open')) return true; } catch (e) {}
+      let style = null;
+      try { style = getComputedStyle(element); } catch (e) { return false; }
+      return style !== null && style.position === 'fixed';
+    }
+
+    /**
+     * Cap fixed overlays whose viewport-unit sizing makes them overflow the
+     * window, so their own scroll container stays reachable.
+     *
+     * Only elements that (a) are anchored to the viewport, (b) scroll their
+     * overflow and (c) really run past the window are marked. A backdrop or a
+     * fullscreen media viewer is left alone: capping it would shrink the paint
+     * without making anything reachable.
+     */
+    function clampViewportUnitOverlays() {
+      if (!overlayClampEnabled() || currentScale === 100) return;
+      const now = Date.now();
+      if (now - lastOverlayPass < 120) return;
+      lastOverlayPass = now;
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      for (const selector of viewportUnitRules()) {
+        let elements = null;
+        try { elements = document.querySelectorAll(selector); } catch (e) { continue; }
+        if (elements.length === 0 || elements.length > 80) continue;
+        for (const element of elements) {
+          if (element.hasAttribute(DIALOG_CLAMP_ATTR)) continue;
+          if (!isViewportAnchored(element)) continue;
+          let style = null;
+          try { style = getComputedStyle(element); } catch (e) { continue; }
+          if (style === null) continue;
+          const scrolls = /auto|scroll/.test(style.overflowY) || /auto|scroll/.test(style.overflowX);
+          if (!scrolls) continue;
+          if (!overflowsViewport(element, viewportWidth, viewportHeight)) continue;
+          element.setAttribute(DIALOG_CLAMP_ATTR, '');
+        }
+      }
     }
 
     function scheduleDialogClampSync() {
@@ -886,12 +1000,16 @@ window.__ModuleLoader__.load({
       const restoreShowModal = patchDialogShowModal();
       // `toggle` (capture) is the fallback for dialogs shown without
       // showModal() (an `open` attribute); the ResizeObserver covers content
-      // that arrives after the dialog opened, and the resize listener covers
-      // window changes while a dialog stays open.
+      // that arrives after the dialog opened, the resize listener covers window
+      // changes, and the gesture listeners catch menus/popovers that only appear
+      // after a click.
       const handleToggle = () => scheduleDialogClampSync();
       const handleResize = () => scheduleDialogClampSync();
+      const handleGesture = () => scheduleDialogClampSync();
       document.addEventListener('toggle', handleToggle, true);
       window.addEventListener('resize', handleResize);
+      window.addEventListener('click', handleGesture, true);
+      window.addEventListener('pointerup', handleGesture, true);
       if (typeof ResizeObserver !== 'undefined') {
         // ResizeObserver runs after layout but before paint of the same frame,
         // so clamping here is still invisible to the user.
@@ -902,6 +1020,8 @@ window.__ModuleLoader__.load({
         restoreShowModal();
         document.removeEventListener('toggle', handleToggle, true);
         window.removeEventListener('resize', handleResize);
+        window.removeEventListener('click', handleGesture, true);
+        window.removeEventListener('pointerup', handleGesture, true);
         if (dialogResizeObserver !== null) {
           for (const dialog of observedDialogs) {
             try { dialogResizeObserver.unobserve(dialog); } catch (e) {}
@@ -1010,6 +1130,7 @@ window.__ModuleLoader__.load({
       // shim is re-evaluated against the new viewport in the same task (no paint
       // happens in between, so the dialog never flashes at its unclamped size).
       releaseDialogClamps();
+      lastOverlayPass = 0;
       syncDialogClamps();
       if (persist) {
         try {

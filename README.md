@@ -139,6 +139,7 @@ dsh plugin --profile web remove dsh-ui-zoom
     step: 5                  # 步进按钮与滚轮的阶梯（5–50）
     compatOverlayHostHeight: true  # 100vh 浮层宿主改写为 height:100%（better-sidebar 兼容）
     compatDialogClamp: true        # 超出窗口的模态 <dialog> 收进窗口内（第三方弹窗兼容）
+    compatOverflowClamp: true     # 用 vh 限高的固定浮层超出窗口时同样收进窗口（路由面板/提示等）
 ```
 
 | 字段 | 默认值 | 说明 |
@@ -149,6 +150,7 @@ dsh plugin --profile web remove dsh-ui-zoom
 | `step` | `5` | 步进/滚轮每档的百分比 |
 | `compatOverlayHostHeight` | `true` | 是否启用 `[data-dsh-panel-host] { height:100% }` 兼容规则 |
 | `compatDialogClamp` | `true` | 是否把超出窗口的模态 `<dialog>` 收进窗口（见下方「弹窗被顶出窗口」） |
+| `compatOverflowClamp` | `true` | 是否把超出窗口、用 `vh` 限高且自身可滚动的固定浮层也收进窗口 |
 
 修改后重启 DSH 生效。桌面端也可以直接在 profile 文件中调整后重启应用。
 
@@ -160,7 +162,7 @@ dsh plugin --profile web remove dsh-ui-zoom
 - 插件把矩形、视口尺寸、指针事件与命中测试统一换算到 CSS 布局像素；以下 API 按浏览器语义保持视觉像素，混用时需自行换算：窗口滚动量、`document.documentElement.clientWidth/clientHeight`、`IntersectionObserver` 条目矩形、滚轮 delta、`screenX/screenY`。详见 [`client.js`](client.js) 顶部说明。
 - 命中测试 API（`elementFromPoint` / `elementsFromPoint` / `caretRangeFromPoint` / `caretPositionFromPoint`）接收布局坐标，由插件换算成浏览器需要的视觉坐标。
 - 第三方插件若自行对 CSS `zoom` 做补偿，可能与本插件重复换算；遇到偏移请先停用其他缩放/transform 类插件排查。
-- **视口单位不随缩放缩小**：Chromium 不会把 `100vh`/`100vw` 除以 CSS `zoom`，所以用 `max-height: calc(100vh - …)` 限制高度的浮层在放大后会比窗口还大。模态 `<dialog>` 由 `compatDialogClamp` 收进窗口（见下条）；其他固定浮层如需自行补偿，可除以本插件在根元素上提供的 `--dsh-ui-zoom-factor`（例如 `calc(100vh / var(--dsh-ui-zoom-factor, 1))`）。
+- **视口单位不随缩放缩小**：Chromium 不会把 `100vh`/`100vw` 除以 CSS `zoom`，所以用 `max-height: calc(100vh - …)` 限制高度的浮层在放大后会比窗口还大。模态 `<dialog>` 由 `compatDialogClamp` 收进窗口，用 `vh` 限高、自身可滚动的固定浮层由 `compatOverflowClamp` 处理（路由面板、峰谷提示这类；插件会在样式表里找 `vh` 限高规则，只收敛实测溢出窗口的元素）；其他浮层如需自行补偿，可除以本插件在根元素上提供的 `--dsh-ui-zoom-factor`（例如 `calc(100vh / var(--dsh-ui-zoom-factor, 1))`）。
 - **第三方浮层还可以直接"托管"给本插件**：给一个固定在视口上的元素（`position: fixed`，或 top layer 里的元素）加上 `data-dsh-ui-zoom-clamp` 属性即可——本插件的样式表会把它的 `max-height` / `max-width` 限制成缩放后的视口尺寸（用百分比表示，在缩放坐标系里就是"视口大小"），超出部分仍由元素自己的滚动容器处理。这等价于上面手工改 CSS，但不用改插件源码。
 - 极端缩放（如 250%）下整页重排仍然存在，滚轮合帧只能降低频率。
 

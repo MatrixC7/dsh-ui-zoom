@@ -139,6 +139,7 @@ Override the plugin row in the profile's `cordis.patch.yml` (`config` is replace
     step: 5                  # stepper/wheel step, 5–50
     compatOverlayHostHeight: true  # rewrite 100vh overlay hosts to height:100% (better-sidebar compatibility)
     compatDialogClamp: true        # pull modal <dialog>s that overflow the window back inside it
+    compatOverflowClamp: true      # same for vh-sized fixed overlays (route panels, alerts)
 ```
 
 | Field | Default | Description |
@@ -149,6 +150,7 @@ Override the plugin row in the profile's `cordis.patch.yml` (`config` is replace
 | `step` | `5` | Percentage per stepper/wheel step |
 | `compatOverlayHostHeight` | `true` | Whether to force `[data-dsh-panel-host] { height:100% }` |
 | `compatDialogClamp` | `true` | Whether to pull overflowing modal `<dialog>` elements back inside the window |
+| `compatOverflowClamp` | `true` | Whether to cap overflowing fixed overlays sized with viewport units (they must scroll their own overflow) |
 
 Restart DSH after changing these values. On Desktop you can also edit the profile file and restart the app.
 
@@ -160,7 +162,7 @@ Restart DSH after changing these values. On Desktop you can also edit the profil
 - Rects, viewport sizes, pointer events and hit-testing inputs share one CSS layout-pixel space. The following keep native visual-pixel semantics and need conversion before mixing: window scroll offsets, `document.documentElement.clientWidth/clientHeight`, `IntersectionObserverEntry` rects, wheel deltas and `screenX/screenY`. See the notes at the top of [`client.js`](client.js).
 - Hit-testing APIs (`elementFromPoint` / `elementsFromPoint` / `caretRangeFromPoint` / `caretPositionFromPoint`) accept layout coordinates; the plugin converts them to the visual coordinates the browser expects.
 - A third-party plugin that compensates CSS `zoom` on its own can double-convert; disable other zoom/transform plugins first when chasing offsets.
-- **Viewport units do not shrink with the zoom factor.** Chromium never divides `100vh`/`100vw` by CSS `zoom`, so an overlay that limits its height with `max-height: calc(100vh - …)` becomes taller than the window once zoomed in. Modal `<dialog>` elements are pulled back inside the window by `compatDialogClamp`; other fixed overlays that need to compensate can divide by `--dsh-ui-zoom-factor`, which the plugin publishes on the root element (e.g. `calc(100vh / var(--dsh-ui-zoom-factor, 1))`).
+- **Viewport units do not shrink with the zoom factor.** Chromium never divides `100vh`/`100vw` by CSS `zoom`, so an overlay that limits its height with `max-height: calc(100vh - …)` becomes taller than the window once zoomed in. Modal `<dialog>` elements are pulled back inside the window by `compatDialogClamp`, and vh-sized fixed overlays that scroll their own overflow (route panels, peak alerts) by `compatOverflowClamp` — it scans the stylesheets for `vh` rules and only caps what it measures as overflowing. Overlays that need their own compensation can divide by `--dsh-ui-zoom-factor`, which the plugin publishes on the root element (e.g. `calc(100vh / var(--dsh-ui-zoom-factor, 1))`).
 - **Third-party overlays can also delegate the cap to this plugin**: add `data-dsh-ui-zoom-clamp` to a viewport-anchored element (`position: fixed`, or anything in the top layer) and the plugin's stylesheet limits its `max-height` / `max-width` to the zoomed viewport (expressed as percentages, which resolve in the zoomed coordinate space); the element keeps scrolling its own overflow. That is the same as editing the CSS above, without patching the plugin.
 - Extreme zoom levels (e.g. 250%) still reflow the whole page; wheel coalescing only reduces the frequency.
 

@@ -4,6 +4,35 @@ All notable changes to `dsh-ui-zoom` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.6.0] - 2026-11-24
+
+### Added
+
+- Fixed-position overlays sized from viewport units are now capped as well, not
+  just modal dialogs. The shim scans the same-origin stylesheets once for rules
+  that size a box with `vh`/`dvh`/`vw` (cached until a plugin injects another
+  sheet), then, on the same triggers as the dialog shim plus clicks/popovers,
+  marks the ones that are anchored to the viewport, scroll their own overflow
+  and really run past the window. That fixes the route panel in
+  `dsh-harness-remote` and the peak/guide overlays in `dsh-cost-meter` at
+  125%+, which used to lose their bottom edge (and their scroll target) to the
+  window clip. Backdrops and fullscreen viewers are left alone: capping paint
+  would not make anything reachable.
+- `compatOverflowClamp` Host config (default `true`) to switch that pass off;
+  the attribute-based CSS itself is shared with `compatDialogClamp`.
+
+### Changed
+
+- The `data-dsh-ui-zoom-clamp` stylesheet rule now caps generic overlays with
+  `calc(100% - 64px)` and keeps the chrome-aware cap for `<dialog>` elements,
+  which sit under the app title bar.
+
+### Tests
+
+- New fixture and checks for a fixed `max-height: calc(100vh - 72px)` overlay:
+  clamped and reachable at 150%, untouched at 100%, and a control run with
+  `compatOverflowClamp: false` proving it overflows without the shim.
+
 ## [0.5.3] - 2026-11-24
 
 ### Added
