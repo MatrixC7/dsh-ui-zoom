@@ -319,6 +319,11 @@ async function main() {
     check('dialog clamp under zoom',
       zoomedDialog.open && zoomedDialog.modal === true && zoomedDialog.clamped === true && zoomedDialog.fits === true && zoomedDialog.buttonVisible === true && zoomedDialog.buttonHit === 'tall-close',
       JSON.stringify({ clamped: zoomedDialog.clamped, fits: zoomedDialog.fits, buttonVisible: zoomedDialog.buttonVisible, hit: zoomedDialog.buttonHit, rect: zoomedDialog.rect, viewport: zoomedDialog.viewport }))
+    // The clamp must be in place for the dialog's very first frame: otherwise
+    // the dialog paints at its overflowing size and visibly jumps right after.
+    await openPage(cdp, '?scale=150')
+    const firstFrame = await cdp.evaluate('window.__openTallDialogFirstFrame()')
+    check('dialog clamped before first paint', firstFrame.clamped === true && firstFrame.fits === true, JSON.stringify(firstFrame))
     check('dialog clamp wired', clampedDialog.styleRules === true && clampedDialog.factor === '1.5' && clampedDialog.maxHeight !== 'none', JSON.stringify(clampedDialog))
 
     await openPage(cdp, '?scale=100')

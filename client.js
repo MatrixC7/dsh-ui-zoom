@@ -756,6 +756,7 @@ window.__ModuleLoader__.load({
     const observedDialogs = new Set();
     let dialogClampFrame = null;
     let dialogResizeObserver = null;
+    const origShowModal = typeof HTMLDialogElement !== 'undefined' ? HTMLDialogElement.prototype.showModal : null;
 
     function dialogClampEnabled() {
       return !SETTINGS || SETTINGS.compatDialogClamp !== false;
@@ -791,6 +792,12 @@ window.__ModuleLoader__.load({
         || rect.bottom > viewportHeight + 0.5 || rect.right > viewportWidth + 0.5;
     }
 
+    function observeDialog(dialog) {
+      if (dialogResizeObserver === null || observedDialogs.has(dialog)) return;
+      observedDialogs.add(dialog);
+      try { dialogResizeObserver.observe(dialog); } catch (e) {}
+    }
+
     function watchDialogs(dialogs) {
       if (dialogResizeObserver === null) return;
       const active = new Set(dialogs);
@@ -799,11 +806,7 @@ window.__ModuleLoader__.load({
         observedDialogs.delete(dialog);
         try { dialogResizeObserver.unobserve(dialog); } catch (e) {}
       }
-      for (const dialog of dialogs) {
-        if (observedDialogs.has(dialog)) continue;
-        observedDialogs.add(dialog);
-        try { dialogResizeObserver.observe(dialog); } catch (e) {}
-      }
+      for (const dialog of dialogs) observeDialog(dialog);
     }
 
     function syncDialogClamps() {
@@ -815,17 +818,26 @@ window.__ModuleLoader__.load({
         watchDialogs(dialogs);
         return;
       }
-      const viewportWidth = window.innerWidth;
-      const viewportHeight = window.innerHeight;
-      for (const dialog of dialogs) {
-        // Already clamped dialogs stay clamped: their current rect is the
-        // clamped one, so re-measuring them would oscillate.
-        if (dialog.hasAttribute(DIALOG_CLAMP_ATTR)) continue;
-        if (dialogOverflowsViewport(dialog, viewportWidth, viewportHeight)) {
-          dialog.setAttribute(DIALOG_CLAMP_ATTR, '');
-        }
-      }
+      for (const dialog of dialogs) clampDialogNow(dialog);
       watchDialogs(dialogs);
+    }
+
+    /**
+     * Clamp one open modal dialog if it overflows the window.
+     *
+     * `showModal()` runs this before the browser paints the dialog, so the dialog
+     * never appears at its overflowing size first and then jumps: the cap is in
+     * place for the very first frame.
+     */
+    function clampDialogNow(dialog) {
+      if (typeof document === 'undefined' || !dialogClampEnabled()) return;
+      if (typeof HTMLDialogElement === 'undefined' || !(dialog instanceof HTMLDialogElement)) return;
+      if (!dialog.open || currentScale === 100) return;
+      // Already clamped dialogs stay clamped: their current rect is the clamped
+      // one, so re-measuring them would oscillate.
+      if (dialog.hasAttribute(DIALOG_CLAMP_ATTR)) return;
+      if (!dialogOverflowsViewport(dialog, window.innerWidth, window.innerHeight)) return;
+      dialog.setAttribute(DIALOG_CLAMP_ATTR, '');
     }
 
     function scheduleDialogClampSync() {
@@ -836,20 +848,56 @@ window.__ModuleLoader__.load({
         : setTimeout(syncDialogClamps, 16);
     }
 
+    /**
+     * Clamp dialogs the instant they are shown.
+     *
+     * Waiting for the `toggle` event costs a frame — the dialog paints at its
+     * overflowing size, then the shim pulls it back, which reads as the window
+     * "jumping into place". Patching `showModal` measures and clamps inside the
+     * same task that opens the dialog, so the first paint is already capped.
+     */
+    function patchDialogShowModal() {
+      if (origShowModal === null || typeof HTMLDialogElement === 'undefined' || !dialogClampEnabled()) {
+        return () => {};
+      }
+      try {
+        HTMLDialogElement.prototype.showModal = function showModal() {
+          const result = origShowModal.apply(this, arguments);
+          try {
+            if (currentScale !== 100) {
+              clampDialogNow(this);
+              observeDialog(this);
+            }
+          } catch (e) {}
+          return result;
+        };
+      } catch (e) {
+        return () => {};
+      }
+      return () => {
+        try { HTMLDialogElement.prototype.showModal = origShowModal; } catch (e) {}
+      };
+    }
+
     function installDialogClampWatchers() {
       if (typeof document === 'undefined' || !dialogClampEnabled()) return () => {};
-      // `toggle` (capture) covers showModal()/close(); the ResizeObserver covers
-      // content that arrives after the dialog opened, and the resize listener
-      // covers window changes while a dialog stays open.
+      const restoreShowModal = patchDialogShowModal();
+      // `toggle` (capture) is the fallback for dialogs shown without
+      // showModal() (an `open` attribute); the ResizeObserver covers content
+      // that arrives after the dialog opened, and the resize listener covers
+      // window changes while a dialog stays open.
       const handleToggle = () => scheduleDialogClampSync();
       const handleResize = () => scheduleDialogClampSync();
       document.addEventListener('toggle', handleToggle, true);
       window.addEventListener('resize', handleResize);
       if (typeof ResizeObserver !== 'undefined') {
-        dialogResizeObserver = new ResizeObserver(() => scheduleDialogClampSync());
+        // ResizeObserver runs after layout but before paint of the same frame,
+        // so clamping here is still invisible to the user.
+        dialogResizeObserver = new ResizeObserver(() => syncDialogClamps());
       }
       syncDialogClamps();
       return () => {
+        restoreShowModal();
         document.removeEventListener('toggle', handleToggle, true);
         window.removeEventListener('resize', handleResize);
         if (dialogResizeObserver !== null) {

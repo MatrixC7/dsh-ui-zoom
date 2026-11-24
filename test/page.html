@@ -227,6 +227,23 @@
   }
   window.__openTallDialog = () => { tallDialog.showModal(); };
   window.__closeTallDialog = () => { if (tallDialog.open) tallDialog.close(); };
+  // What the browser is about to paint for the very first frame of the dialog:
+  // requestAnimationFrame callbacks run before style/layout/paint of that frame,
+  // so a clamp applied here in time means the dialog never flashes at its
+  // overflowing size and then jumps into place.
+  window.__openTallDialogFirstFrame = () => new Promise(resolve => {
+    tallDialog.showModal();
+    requestAnimationFrame(() => {
+      const native = window.__native;
+      const rect = native.rect.call(tallDialog);
+      const viewportHeight = native.innerHeight.call(window);
+      resolve({
+        clamped: tallDialog.hasAttribute('data-dsh-ui-zoom-clamp'),
+        height: rect.height,
+        fits: rect.top >= -0.5 && rect.bottom <= viewportHeight + 0.5,
+      });
+    });
+  });
   window.__dialogState = () => {
     const native = window.__native;
     const rect = native.rect.call(tallDialog);

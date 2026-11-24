@@ -4,6 +4,25 @@ All notable changes to `dsh-ui-zoom` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.5.2] - 2026-11-24
+
+### Fixed
+
+- Modal dialogs no longer flash at their overflowing size before the shim pulls
+  them back into the window. The clamp is now applied inside a patched
+  `HTMLDialogElement.prototype.showModal`, in the same task that opens the
+  dialog, so the very first frame is already capped; before, the clamp waited
+  for the `toggle` event and a `requestAnimationFrame`, which let the dialog
+  paint one frame at its overflowing position and then visibly jump. The
+  `toggle` path stays as a fallback for dialogs shown through the `open`
+  attribute, and the `ResizeObserver` keeps handling content that arrives later
+  (it runs after layout but before paint, so that path does not flash either).
+
+### Added
+
+- Regression check that the clamp is in place for the dialog's first paint, plus
+  a control run showing the dialog un-clamped without the `showModal` patch.
+
 ## [0.5.1] - 2026-11-24
 
 ### Fixed
