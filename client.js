@@ -138,6 +138,30 @@ window.__ModuleLoader__.load({
         opacity: 0.4;
         cursor: default;
       }
+      .dsh-ui-zoom-diag {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+        padding: 0 0 16px;
+        border-bottom: 0.5px solid var(--dsw-alias-border-l2, rgba(128, 128, 128, 0.2));
+      }
+      .dsh-ui-zoom-diag-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        color: var(--dsw-alias-label-secondary);
+        cursor: pointer;
+      }
+      .dsh-ui-zoom-diag-toggle input {
+        margin: 0;
+        accent-color: var(--dsw-alias-state-business-primary, #4b7ff5);
+      }
+      .dsh-ui-zoom-diag-status {
+        font-size: 12px;
+        color: var(--dsw-alias-label-tertiary);
+      }
     `;
 
     /* =========================================================================
@@ -280,7 +304,12 @@ window.__ModuleLoader__.load({
         reset: '重置 (100%)',
         zoomIn: '放大界面',
         zoomOut: '缩小界面',
-        hud: '界面缩放: {percent}%'
+        hud: '界面缩放: {percent}%',
+        diagnostics: '诊断模式',
+        copyDiagnostics: '复制诊断报告',
+        diagnosticsCopied: '已复制到剪贴板',
+        diagnosticsPrinted: '已输出到控制台',
+        diagnosticsFailed: '复制失败，已输出到控制台'
       },
       en: {
         title: 'UI Zoom',
@@ -289,7 +318,12 @@ window.__ModuleLoader__.load({
         reset: 'Reset (100%)',
         zoomIn: 'Zoom in',
         zoomOut: 'Zoom out',
-        hud: 'UI Zoom: {percent}%'
+        hud: 'UI Zoom: {percent}%',
+        diagnostics: 'Diagnostics',
+        copyDiagnostics: 'Copy diagnostics report',
+        diagnosticsCopied: 'Copied to clipboard',
+        diagnosticsPrinted: 'Printed to the console',
+        diagnosticsFailed: 'Copy failed, printed to the console'
       }
     };
 
@@ -370,7 +404,8 @@ window.__ModuleLoader__.load({
       step: 5,
       compatOverlayHostHeight: true,
       compatDialogClamp: true,
-      compatOverflowClamp: true
+      compatOverflowClamp: true,
+      diagnostics: false
     };
 
     function readUiZoomSettings() {
@@ -398,7 +433,10 @@ window.__ModuleLoader__.load({
       const compatOverflowClamp = source.compatOverflowClamp === undefined
         ? DEFAULT_SETTINGS.compatOverflowClamp
         : source.compatOverflowClamp !== false;
-      return { defaultScale, minScale, maxScale, step, compatOverlayHostHeight, compatDialogClamp, compatOverflowClamp };
+      const diagnostics = source.diagnostics === undefined
+        ? DEFAULT_SETTINGS.diagnostics
+        : source.diagnostics === true;
+      return { defaultScale, minScale, maxScale, step, compatOverlayHostHeight, compatDialogClamp, compatOverflowClamp, diagnostics };
     }
 
     const SETTINGS = readUiZoomSettings();
@@ -873,9 +911,12 @@ window.__ModuleLoader__.load({
 
     function releaseDialogClamps() {
       if (typeof document === 'undefined') return;
+      let released = 0;
       for (const element of document.querySelectorAll('[' + DIALOG_CLAMP_ATTR + ']')) {
         element.removeAttribute(DIALOG_CLAMP_ATTR);
+        released += 1;
       }
+      if (released > 0) diagLog('release-clamps', { count: released });
     }
 
     function overflowsViewport(element, viewportWidth, viewportHeight) {
@@ -934,6 +975,7 @@ window.__ModuleLoader__.load({
       if (dialog.hasAttribute(DIALOG_CLAMP_ATTR)) return;
       if (!overflowsViewport(dialog, window.innerWidth, window.innerHeight)) return;
       dialog.setAttribute(DIALOG_CLAMP_ATTR, '');
+      diagLog('dialog-clamp', { element: describeElement(dialog), rect: describeRect(dialog), viewport: { width: window.innerWidth, height: window.innerHeight } });
     }
 
     // --- Fixed overlays sized from viewport units -----------------------------
@@ -1028,6 +1070,7 @@ window.__ModuleLoader__.load({
           if (!scrolls) continue;
           if (!overflowsViewport(element, viewportWidth, viewportHeight)) continue;
           element.setAttribute(DIALOG_CLAMP_ATTR, '');
+          diagLog('overlay-clamp', { selector, element: describeElement(element), rect: describeRect(element) });
         }
       }
     }
@@ -1089,10 +1132,13 @@ window.__ModuleLoader__.load({
       modalPresenceFrame = null;
       let open = false;
       try { open = document.querySelector('[aria-modal="true"], dialog[open]') !== null; } catch (e) { open = false; }
+      const previous = document.documentElement.getAttribute(MODAL_PRESENCE_ATTR);
+      const next = open ? '1' : null;
       try {
         if (open) document.documentElement.setAttribute(MODAL_PRESENCE_ATTR, '1');
         else document.documentElement.removeAttribute(MODAL_PRESENCE_ATTR);
       } catch (e) {}
+      if (previous !== next) diagLog('drag-region', { modal: open, lifted: next === '1' });
     }
 
     function scheduleModalPresenceSync() {
@@ -1268,6 +1314,7 @@ window.__ModuleLoader__.load({
       releaseDialogClamps();
       lastOverlayPass = 0;
       syncDialogClamps();
+      diagLog('scale', { scale: clamped, innerWidth: window.innerWidth, innerHeight: window.innerHeight, factor: document.documentElement.style.getPropertyValue('--dsh-ui-zoom-factor') || '' });
       if (persist) {
         try {
           if (typeof localStorage !== 'undefined') {
@@ -1362,6 +1409,184 @@ window.__ModuleLoader__.load({
     }
 
     /* =========================================================================
+     * SECTION 5b: Diagnostics
+     * =========================================================================
+     * Off by default. When enabled — Host Config `diagnostics`, the toggle in the
+     * settings row, or localStorage `dsh.ui.zoom_diagnostics=1` — the plugin keeps
+     * a small ring buffer of shim decisions, prints them, and answers
+     * `window.__dshUiZoomDiagnostics()` with a snapshot the settings row can copy
+     * to the clipboard. That turns "something is off under zoom" into a report
+     * showing which elements were clamped, whether the Windows titlebar drag
+     * region is lifted for a modal, and whether the coordinate spaces the plugin
+     * normalises still agree with the browser.
+     * ========================================================================= */
+    const DIAGNOSTICS_STORAGE_KEY = 'dsh.ui.zoom_diagnostics';
+    const DIAGNOSTICS_LIMIT = 80;
+    const diagnosticsLog = [];
+    const PLUGIN_VERSION = (function () {
+      const raw = typeof globalThis !== 'undefined' ? globalThis.__DSH_UI_ZOOM_CONFIG__ : undefined;
+      const version = raw && typeof raw.version === 'string' ? raw.version : '';
+      return version === '' ? 'unknown' : version;
+    })();
+
+    function diagnosticsOverride() {
+      if (typeof localStorage === 'undefined') return null;
+      try {
+        const raw = localStorage.getItem(DIAGNOSTICS_STORAGE_KEY);
+        if (raw === '1') return true;
+        if (raw === '0') return false;
+      } catch (e) {}
+      return null;
+    }
+
+    function diagnosticsEnabled() {
+      const override = diagnosticsOverride();
+      if (override !== null) return override;
+      return !!(SETTINGS && SETTINGS.diagnostics === true);
+    }
+
+    function setDiagnosticsOverride(value) {
+      try {
+        if (typeof localStorage === 'undefined') return;
+        if (value === null) localStorage.removeItem(DIAGNOSTICS_STORAGE_KEY);
+        else localStorage.setItem(DIAGNOSTICS_STORAGE_KEY, value ? '1' : '0');
+      } catch (e) {}
+    }
+
+    function describeElement(element) {
+      if (!element || typeof element.tagName !== 'string') return 'unknown';
+      const parts = [element.tagName.toLowerCase()];
+      if (element.id) parts.push('#' + element.id);
+      const className = typeof element.className === 'string' ? element.className.trim() : '';
+      if (className !== '') parts.push('.' + className.split(/\s+/).slice(0, 3).join('.'));
+      if (typeof element.getAttribute === 'function') {
+        for (const attribute of ['role', 'aria-modal', 'data-dsh-better-sidebar']) {
+          const value = element.getAttribute(attribute);
+          if (value !== null && value !== '') parts.push('[' + attribute + (value === '' ? '' : '="' + value + '"') + ']');
+        }
+      }
+      return parts.join('');
+    }
+
+    function describeRect(element) {
+      try {
+        const rect = element.getBoundingClientRect();
+        return { left: Math.round(rect.left), top: Math.round(rect.top), width: Math.round(rect.width), height: Math.round(rect.height) };
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function diagLog(event, detail) {
+      if (!diagnosticsEnabled()) return;
+      const entry = { at: Math.round(typeof performance !== 'undefined' ? performance.now() : Date.now()), event };
+      if (detail !== undefined) entry.detail = detail;
+      diagnosticsLog.push(entry);
+      while (diagnosticsLog.length > DIAGNOSTICS_LIMIT) diagnosticsLog.shift();
+      try { console.info('[dsh-ui-zoom]', event, detail === undefined ? '' : detail); } catch (e) {}
+    }
+
+    function viewportSnapshot() {
+      if (typeof document === 'undefined') return null;
+      const scope = document.documentElement;
+      const body = document.body;
+      const viewport = typeof window !== 'undefined' ? window.visualViewport : null;
+      const metrics = {
+        zoom: currentScale,
+        zoomStyle: scope.style.zoom === '' ? '' : scope.style.zoom,
+        factorProperty: scope.style.getPropertyValue('--dsh-ui-zoom-factor'),
+        innerWidth: window.innerWidth,
+        innerHeight: window.innerHeight,
+        rootClientWidth: scope.clientWidth,
+        rootClientHeight: scope.clientHeight,
+        bodyClientWidth: body ? body.clientWidth : null,
+        bodyClientHeight: body ? body.clientHeight : null,
+        rootRect: describeRect(scope),
+        scrollWidth: scope.scrollWidth,
+        scrollHeight: scope.scrollHeight,
+        visualViewport: viewport ? { width: Math.round(viewport.width), height: Math.round(viewport.height), scale: viewport.scale } : null,
+        devicePixelRatio: window.devicePixelRatio,
+        scrollX: window.scrollX,
+        scrollY: window.scrollY
+      };
+      // Space-consistency check: after normalisation these must agree within a
+      // pixel; a mismatch points at a third party rewriting one of them.
+      metrics.consistent = Math.abs(metrics.innerWidth - metrics.rootClientWidth) <= 1
+        && Math.abs(metrics.innerHeight - metrics.rootClientHeight) <= 1
+        && (metrics.rootRect === null || Math.abs(metrics.rootRect.width - metrics.rootClientWidth) <= 1);
+      return metrics;
+    }
+
+    function markedElements() {
+      if (typeof document === 'undefined') return [];
+      const marked = [];
+      for (const element of document.querySelectorAll('[' + DIALOG_CLAMP_ATTR + ']')) {
+        let modal = false;
+        try { modal = element.tagName === 'DIALOG' && element.matches(':modal'); } catch (e) {}
+        let overflow = '';
+        try {
+          const style = getComputedStyle(element);
+          overflow = style.overflowX + '/' + style.overflowY;
+        } catch (e) {}
+        marked.push({ element: describeElement(element), rect: describeRect(element), modal, overflow });
+      }
+      return marked;
+    }
+
+    function buildDiagnosticsReport() {
+      const enabled = diagnosticsEnabled();
+      let modalOpen = false;
+      if (typeof document !== 'undefined') {
+        try { modalOpen = document.querySelector('[aria-modal="true"], dialog[open]') !== null; } catch (e) {}
+      }
+      return {
+        plugin: 'dsh-ui-zoom',
+        version: PLUGIN_VERSION,
+        enabled,
+        when: new Date().toISOString(),
+        settings: Object.assign({}, SETTINGS),
+        environment: {
+          userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+          platform: typeof document !== 'undefined' ? (document.documentElement.dataset.platform || '') : ''
+        },
+        viewport: viewportSnapshot(),
+        shims: {
+          dialogClamp: dialogClampEnabled(),
+          overlayClamp: overlayClampEnabled(),
+          overlayHostHeight: !SETTINGS || SETTINGS.compatOverlayHostHeight !== false
+        },
+        dragRegion: {
+          titlebarPresent: typeof document !== 'undefined' && document.querySelector('[data-windows-titlebar]') !== null,
+          liftedAttribute: typeof document !== 'undefined' ? document.documentElement.getAttribute('data-dsh-ui-zoom-modal') : null,
+          modalOpen
+        },
+        marked: markedElements(),
+        recent: diagnosticsLog.slice(-40)
+      };
+    }
+
+    function copyDiagnosticsReport() {
+      const report = buildDiagnosticsReport();
+      const text = JSON.stringify(report, null, 2);
+      try { console.info('[dsh-ui-zoom] diagnostics report\n' + text); } catch (e) {}
+      const clipboard = typeof navigator !== 'undefined' ? navigator.clipboard : null;
+      if (clipboard && typeof clipboard.writeText === 'function') {
+        return clipboard.writeText(text).then(() => 'copied').catch(() => 'printed');
+      }
+      return Promise.resolve('printed');
+    }
+
+    function publishDiagnosticsApi() {
+      if (typeof window === 'undefined') return function noop() {};
+      try {
+        window.__dshUiZoomDiagnostics = function __dshUiZoomDiagnostics() { return buildDiagnosticsReport(); };
+      } catch (e) {}
+      return function removeDiagnosticsApi() {
+        try { delete window.__dshUiZoomDiagnostics; } catch (e) { window.__dshUiZoomDiagnostics = undefined; }
+      };
+    }
+
+    /* =========================================================================
      * SECTION 6: React UI Settings Component
      * ========================================================================= */
     function useLocaleRevision() {
@@ -1375,6 +1600,8 @@ window.__ModuleLoader__.load({
 
     function ZoomSettingsRow() {
       const [scale, setScaleState] = React.useState(currentScale);
+      const [diagnostics, setDiagnosticsState] = React.useState(diagnosticsEnabled());
+      const [diagnosticsStatus, setDiagnosticsStatus] = React.useState('');
       // Re-render when the active locale switches (dictionary registration or a
       // language change bumps the locale revision).
       useLocaleRevision();
@@ -1386,6 +1613,25 @@ window.__ModuleLoader__.load({
           listeners.delete(update);
         };
       }, []);
+
+      const toggleDiagnostics = (enabled) => {
+        setDiagnosticsOverride(enabled);
+        setDiagnosticsState(enabled);
+        setDiagnosticsStatus('');
+        diagLog('diagnostics-toggle', { enabled });
+        if (enabled) {
+          // A snapshot right away makes the console useful even before an
+          // incident: it shows the invariants the plugin keeps.
+          diagLog('snapshot', viewportSnapshot());
+        }
+      };
+      const handleCopyDiagnostics = () => {
+        copyDiagnosticsReport().then((result) => {
+          setDiagnosticsStatus(translate(result === 'copied' ? 'diagnosticsCopied' : 'diagnosticsPrinted'));
+        }).catch(() => {
+          setDiagnosticsStatus(translate('diagnosticsFailed'));
+        });
+      };
 
       const title = translate('title');
       const desc = translate('desc');
@@ -1438,6 +1684,26 @@ window.__ModuleLoader__.load({
             onClick: resetZoom,
             'aria-label': resetLabel
           }, resetLabel)
+        ),
+        // Diagnostics: a live toggle (localStorage override, no restart) and a
+        // report copy button, so a misbehaving window can be described without a
+        // debugger.
+        h('div', { className: 'dsh-ui-zoom-diag' },
+          h('label', { className: 'dsh-ui-zoom-diag-toggle', title: translate('desc') },
+            h('input', {
+              type: 'checkbox',
+              checked: diagnostics,
+              onChange: (event) => toggleDiagnostics(event.target.checked)
+            }),
+            h('span', null, translate('diagnostics'))
+          ),
+          h('button', {
+            type: 'button',
+            className: 'dsh-ui-zoom-reset-btn',
+            onClick: handleCopyDiagnostics,
+            'aria-label': translate('copyDiagnostics')
+          }, translate('copyDiagnostics')),
+          diagnosticsStatus === '' ? null : h('span', { className: 'dsh-ui-zoom-diag-status', role: 'status' }, diagnosticsStatus)
         )
       );
     }
@@ -1449,6 +1715,8 @@ window.__ModuleLoader__.load({
       inject: ['slots'],
       apply(ctx) {
         ensureStyles();
+        const removeDiagnosticsApi = publishDiagnosticsApi();
+        diagLog('activate', { version: PLUGIN_VERSION, settings: SETTINGS, viewport: viewportSnapshot() });
 
         // 0. Client locale: the HUD and the settings row resolve copy through the
         // shared service when the composition provides it (live language switch),
@@ -1531,6 +1799,8 @@ window.__ModuleLoader__.load({
           window.addEventListener('storage', handleStorage);
 
           return () => {
+            diagLog('deactivate', {});
+            removeDiagnosticsApi();
             uninstallWindowAndRectPatches();
             disposeDialogClampWatchers();
             disposeModalPresence();

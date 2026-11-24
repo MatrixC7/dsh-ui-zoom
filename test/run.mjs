@@ -370,6 +370,37 @@ async function main() {
     const presenceClosed = await cdp.evaluate("document.documentElement.getAttribute('data-dsh-ui-zoom-modal')")
     check('modal presence flag', presenceOpen === '1' && presenceClosed === null, JSON.stringify({ open: presenceOpen, closed: presenceClosed }))
 
+    // 12. Diagnostics: the API exists, is off by default, names the build and
+    //     reports the shims, the marked elements and the drag-region state.
+    const diagnosticsOff = await cdp.evaluate('window.__dshUiZoomDiagnostics ? window.__dshUiZoomDiagnostics().enabled : "missing"')
+    await cdp.evaluate(`localStorage.setItem('dsh.ui.zoom_diagnostics', '1')`)
+    await openPage(cdp, '?scale=150')
+    await cdp.evaluate('window.__openTallDialog()')
+    await sleep(300)
+    const diagnosticsOn = await cdp.evaluate(`(() => {
+      const report = window.__dshUiZoomDiagnostics();
+      return {
+        enabled: report.enabled,
+        version: report.version,
+        zoom: report.viewport.zoom,
+        consistent: report.viewport.consistent,
+        marked: report.marked.map(entry => entry.element),
+        dialogClamp: report.shims.dialogClamp,
+        dragRegion: report.dragRegion,
+        recent: report.recent.map(entry => entry.event)
+      };
+    })()`)
+    await cdp.evaluate(`localStorage.removeItem('dsh.ui.zoom_diagnostics')`)
+    check('diagnostics report',
+      diagnosticsOff === false
+      && diagnosticsOn.enabled === true
+      && diagnosticsOn.zoom === 150
+      && diagnosticsOn.consistent === true
+      && diagnosticsOn.marked.some(name => name.startsWith('dialog'))
+      && diagnosticsOn.dragRegion !== null
+      && diagnosticsOn.recent.includes('dialog-clamp'),
+      JSON.stringify({ off: diagnosticsOff, on: diagnosticsOn }))
+
     // Control: with the shim switched off the same fixture really does overflow
     // the window and its close button falls outside it, so the checks above
     // prove the fix instead of a dialog that never overflows in the first place.

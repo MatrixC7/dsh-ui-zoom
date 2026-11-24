@@ -140,6 +140,7 @@ dsh plugin --profile web remove dsh-ui-zoom
     compatOverlayHostHeight: true  # 100vh 浮层宿主改写为 height:100%（better-sidebar 兼容）
     compatDialogClamp: true        # 超出窗口的模态 <dialog> 收进窗口内（第三方弹窗兼容）
     compatOverflowClamp: true     # 用 vh 限高的固定浮层超出窗口时同样收进窗口（路由面板/提示等）
+    diagnostics: false            # 启动时开启诊断模式（也可在设置里随时开关，无需重启）
 ```
 
 | 字段 | 默认值 | 说明 |
@@ -151,6 +152,7 @@ dsh plugin --profile web remove dsh-ui-zoom
 | `compatOverlayHostHeight` | `true` | 是否启用 `[data-dsh-panel-host] { height:100% }` 兼容规则 |
 | `compatDialogClamp` | `true` | 是否把超出窗口的模态 `<dialog>` 收进窗口（见下方「弹窗被顶出窗口」） |
 | `compatOverflowClamp` | `true` | 是否把超出窗口、用 `vh` 限高且自身可滚动的固定浮层也收进窗口 |
+| `diagnostics` | `false` | 启动时是否开启诊断模式（设置里可随时开关，见「诊断与反馈」） |
 
 修改后重启 DSH 生效。桌面端也可以直接在 profile 文件中调整后重启应用。
 
@@ -165,6 +167,31 @@ dsh plugin --profile web remove dsh-ui-zoom
 - **视口单位不随缩放缩小**：Chromium 不会把 `100vh`/`100vw` 除以 CSS `zoom`，所以用 `max-height: calc(100vh - …)` 限制高度的浮层在放大后会比窗口还大。模态 `<dialog>` 由 `compatDialogClamp` 收进窗口，用 `vh` 限高、自身可滚动的固定浮层由 `compatOverflowClamp` 处理（路由面板、峰谷提示这类；插件会在样式表里找 `vh` 限高规则，只收敛实测溢出窗口的元素）；其他浮层如需自行补偿，可除以本插件在根元素上提供的 `--dsh-ui-zoom-factor`（例如 `calc(100vh / var(--dsh-ui-zoom-factor, 1))`）。
 - **第三方浮层还可以直接"托管"给本插件**：给一个固定在视口上的元素（`position: fixed`，或 top layer 里的元素）加上 `data-dsh-ui-zoom-clamp` 属性即可——本插件的样式表会把它的 `max-height` / `max-width` 限制成缩放后的视口尺寸（用百分比表示，在缩放坐标系里就是"视口大小"），超出部分仍由元素自己的滚动容器处理。这等价于上面手工改 CSS，但不用改插件源码。
 - 极端缩放（如 250%）下整页重排仍然存在，滚轮合帧只能降低频率。
+
+---
+
+---
+
+## 🩺 诊断与反馈
+
+缩放类问题的现象往往只有一句话（"这个按钮点不到""面板跑到窗口外"），但原因可能在我们这层、在某个插件，或在浏览器的缩放实现里。为此插件内置一个**诊断模式**（默认关）：
+
+- **开关位置**：设置 → 通用 → 界面缩放 → 勾选「诊断模式」。这个开关写在 localStorage（`dsh.ui.zoom_diagnostics`），**即时生效、不用重启**，也不会改动部署配置；
+- **部署默认值**：如果希望一启动就开，把 Host Config 的 `diagnostics` 设为 `true`（需重启）；
+- **「复制诊断报告」** 按钮把当前状态复制到剪贴板（复制失败时打印到控制台），内容是一段 JSON：
+
+  | 字段 | 含义 |
+  |---|---|
+  | `version` / `settings` / `environment` | 插件版本、生效配置、浏览器 UA 与平台标记 |
+  | `viewport` | 缩放值、`innerWidth/Height`、根节点 `client*`、`visualViewport`、DPR、滚动量，以及 `consistent`（这些值是否仍在同一个坐标系里） |
+  | `shims` | 三段兼容层各自是否启用 |
+  | `dragRegion` | 是否检测到 Windows 标题栏拖拽区、是否已为模态解除（`liftedAttribute`）、当前是否有模态 |
+  | `marked` | 被打了 `data-dsh-ui-zoom-clamp` 的元素：选择器描述、矩形、是否模态、overflow |
+  | `recent` | 最近 40 条插件决策（缩放、收敛、解除拖拽区、开关诊断…） |
+
+- 开着诊断模式时，同样的信息也会以 `[dsh-ui-zoom]` 前缀打到控制台；页面里还可以直接调 `window.__dshUiZoomDiagnostics()` 拿这份对象。
+
+遇到问题时：勾上诊断模式 → 复现一次 → 点「复制诊断报告」→ 把内容发出来即可。报告里 `viewport.consistent` 为 `false` 就说明有别的代码改了这些尺寸；`dragRegion.liftedAttribute` 与 `modalOpen` 不一致则说明拖拽区状态没跟上。
 
 ---
 

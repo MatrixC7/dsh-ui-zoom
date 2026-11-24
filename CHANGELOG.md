@@ -4,6 +4,33 @@ All notable changes to `dsh-ui-zoom` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.7.0] - 2026-11-24
+
+### Added
+
+- **Diagnostics mode** (off by default) for future zoom reports: a toggle in
+  Settings → General → UI Zoom (localStorage override, applies immediately, no
+  restart), a Host Config `diagnostics` for the from-boot default, a console
+  event log with a `[dsh-ui-zoom]` prefix, and a "Copy diagnostics report"
+  button that puts a JSON snapshot on the clipboard. The snapshot carries the
+  plugin version (injected by the host half), effective settings, the viewport
+  metrics the plugin normalises plus a `consistent` flag, which compatibility
+  layers are on, the Windows titlebar drag-region state, every element carrying
+  `data-dsh-ui-zoom-clamp` with its rect, and the last 40 shim decisions
+  (zoom, clamps, drag-region lift, toggle).
+- `window.__dshUiZoomDiagnostics()` exposes the same snapshot to page scripts.
+
+### Changed
+
+- The host half publishes its own version alongside the config, so a report
+  always names the build that produced it.
+
+### Tests
+
+- Diagnostics checks: the API is present and disabled by default, and with the
+  localStorage override it reports zoom, space consistency, the clamped dialog
+  and the drag-region state (42 checks total).
+
 ## [0.6.3] - 2026-11-24
 
 ### Fixed

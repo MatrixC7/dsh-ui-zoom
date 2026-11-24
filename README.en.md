@@ -140,6 +140,7 @@ Override the plugin row in the profile's `cordis.patch.yml` (`config` is replace
     compatOverlayHostHeight: true  # rewrite 100vh overlay hosts to height:100% (better-sidebar compatibility)
     compatDialogClamp: true        # pull modal <dialog>s that overflow the window back inside it
     compatOverflowClamp: true      # same for vh-sized fixed overlays (route panels, alerts)
+    diagnostics: false             # start with diagnostics on (toggleable live in Settings, no restart)
 ```
 
 | Field | Default | Description |
@@ -151,6 +152,7 @@ Override the plugin row in the profile's `cordis.patch.yml` (`config` is replace
 | `compatOverlayHostHeight` | `true` | Whether to force `[data-dsh-panel-host] { height:100% }` |
 | `compatDialogClamp` | `true` | Whether to pull overflowing modal `<dialog>` elements back inside the window |
 | `compatOverflowClamp` | `true` | Whether to cap overflowing fixed overlays sized with viewport units (they must scroll their own overflow) |
+| `diagnostics` | `false` | Whether to start with diagnostics on (see "Diagnostics", toggleable live) |
 
 Restart DSH after changing these values. On Desktop you can also edit the profile file and restart the app.
 
@@ -165,6 +167,31 @@ Restart DSH after changing these values. On Desktop you can also edit the profil
 - **Viewport units do not shrink with the zoom factor.** Chromium never divides `100vh`/`100vw` by CSS `zoom`, so an overlay that limits its height with `max-height: calc(100vh - …)` becomes taller than the window once zoomed in. Modal `<dialog>` elements are pulled back inside the window by `compatDialogClamp`, and vh-sized fixed overlays that scroll their own overflow (route panels, peak alerts) by `compatOverflowClamp` — it scans the stylesheets for `vh` rules and only caps what it measures as overflowing. Overlays that need their own compensation can divide by `--dsh-ui-zoom-factor`, which the plugin publishes on the root element (e.g. `calc(100vh / var(--dsh-ui-zoom-factor, 1))`).
 - **Third-party overlays can also delegate the cap to this plugin**: add `data-dsh-ui-zoom-clamp` to a viewport-anchored element (`position: fixed`, or anything in the top layer) and the plugin's stylesheet limits its `max-height` / `max-width` to the zoomed viewport (expressed as percentages, which resolve in the zoomed coordinate space); the element keeps scrolling its own overflow. That is the same as editing the CSS above, without patching the plugin.
 - Extreme zoom levels (e.g. 250%) still reflow the whole page; wheel coalescing only reduces the frequency.
+
+---
+
+---
+
+## 🩺 Diagnostics
+
+A zoom problem usually arrives as one sentence ("this button does not respond", "the panel runs off the window"), while the cause can sit in this plugin, in another plugin, or in the browser's zoom implementation. The plugin ships a **diagnostics mode** (off by default) for exactly that:
+
+- **Where to toggle it**: Settings → General → UI Zoom → "Diagnostics". It writes a localStorage override (`dsh.ui.zoom_diagnostics`), applies **immediately without a restart** and does not touch the deployment config.
+- **Deployment default**: set the Host Config `diagnostics` to `true` (restart required) if you want it on from boot.
+- **"Copy diagnostics report"** copies the current state as JSON (and prints it to the console when the clipboard is unavailable):
+
+  | Field | Meaning |
+  |---|---|
+  | `version`, `settings`, `environment` | Plugin build, effective config, UA and platform marker |
+  | `viewport` | Zoom, `innerWidth/Height`, root `client*`, `visualViewport`, DPR, scroll offsets, and `consistent` (whether those still live in one coordinate space) |
+  | `shims` | Which compatibility layers are enabled |
+  | `dragRegion` | Whether the Windows titlebar drag region is present, lifted for a modal (`liftedAttribute`), and whether a modal is open |
+  | `marked` | Elements carrying `data-dsh-ui-zoom-clamp`: description, rect, modality, overflow |
+  | `recent` | The last 40 plugin decisions (zoom, clamps, drag-region lift, toggle…) |
+
+- While enabled, the same events are logged to the console with a `[dsh-ui-zoom]` prefix, and `window.__dshUiZoomDiagnostics()` returns the object.
+
+When something looks wrong: enable diagnostics, reproduce once, press "Copy diagnostics report", and send the JSON. `viewport.consistent: false` means some other code changed those sizes; `dragRegion.liftedAttribute` disagreeing with `modalOpen` means the drag region state did not follow.
 
 ---
 
