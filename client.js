@@ -230,9 +230,6 @@ window.__ModuleLoader__.load({
           html:has([aria-modal="true"]) [data-windows-titlebar] .frame::before,
           html:has([aria-modal="true"]) [data-windows-titlebar].frame::before,
           html[data-windows-titlebar]:has([aria-modal="true"]) .frame::before,
-          html:has([role="dialog"]) [data-windows-titlebar] .frame::before,
-          html:has([role="dialog"]) [data-windows-titlebar].frame::before,
-          html[data-windows-titlebar]:has([role="dialog"]) .frame::before,
           html:has(dialog[open]) [data-windows-titlebar] .frame::before,
           html:has(dialog[open]) [data-windows-titlebar].frame::before,
           html[data-windows-titlebar]:has(dialog[open]) .frame::before {
