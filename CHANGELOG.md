@@ -4,6 +4,28 @@ All notable changes to `dsh-ui-zoom` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.6.1] - 2026-11-24
+
+### Fixed
+
+- Modal surfaces no longer fall inside the window's titlebar drag region. On
+  Windows the DSH frame paints that region as a `-webkit-app-region: drag`
+  pseudo-element (`--dsh-windows-titlebar-height` tall), and a drag region is
+  non-client area: the page never sees hover or clicks there. Once the interface
+  is zoomed, a modal that reaches the top of the window (the settings surface at
+  175%, for instance) puts its header — and the close button — inside that band,
+  so the button looks complete but only the few pixels below the band respond.
+  `WM_NCHITTEST` over the band reports `HTCAPTION`, which is how the band was
+  identified. The shim now keeps modal surfaces out of the drag region and drops
+  the titlebar's own drag region while a modal is open (it comes back through
+  `:has()` as soon as the modal closes), so the window cannot be dragged behind
+  a modal — which is what a modal wants anyway.
+
+### Verification
+
+- Regression suite still 38/38; the fix itself has to be verified in the desktop
+  shell, where drag regions exist (headless Chromium has none).
+
 ## [0.6.0] - 2026-11-24
 
 ### Added

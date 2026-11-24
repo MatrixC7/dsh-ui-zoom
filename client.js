@@ -205,6 +205,40 @@ window.__ModuleLoader__.load({
           }
         `);
         }
+        // DSH paints the Windows titlebar drag region as a `-webkit-app-region: drag`
+        // pseudo-element across the top of the frame (`--dsh-windows-titlebar-height`).
+        // A drag region is non-client area: hover and clicks inside it never reach
+        // the page. As soon as the interface is zoomed, a modal that reaches the top
+        // of the window (full-height panels, for instance) has its header — close
+        // button included — sitting under that band, so the button looks fine and is
+        // half dead. Keeping modal surfaces out of the drag region restores input
+        // there; dragging the window while a modal is open is not wanted anyway.
+        rules.push(`
+          /* Compatibility Shim: modal surfaces stay out of the window drag region */
+          [aria-modal="true"],
+          [role="dialog"],
+          [aria-modal="true"] *,
+          [role="dialog"] *,
+          dialog[open],
+          dialog[open] * {
+            -webkit-app-region: no-drag !important;
+          }
+          /* Belt and braces: while a modal is open, drop the titlebar's own drag
+             region for that moment (the window cannot usefully be dragged behind a
+             modal anyway). :has() re-evaluates when the modal closes, so dragging
+             comes straight back. */
+          html:has([aria-modal="true"]) [data-windows-titlebar] .frame::before,
+          html:has([aria-modal="true"]) [data-windows-titlebar].frame::before,
+          html[data-windows-titlebar]:has([aria-modal="true"]) .frame::before,
+          html:has([role="dialog"]) [data-windows-titlebar] .frame::before,
+          html:has([role="dialog"]) [data-windows-titlebar].frame::before,
+          html[data-windows-titlebar]:has([role="dialog"]) .frame::before,
+          html:has(dialog[open]) [data-windows-titlebar] .frame::before,
+          html:has(dialog[open]) [data-windows-titlebar].frame::before,
+          html[data-windows-titlebar]:has(dialog[open]) .frame::before {
+            -webkit-app-region: no-drag !important;
+          }
+        `);
         return rules.join('\n');
       }
     };
