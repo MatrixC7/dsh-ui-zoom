@@ -4,6 +4,29 @@ All notable changes to `dsh-ui-zoom` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.6.3] - 2026-11-24
+
+### Fixed
+
+- `document.documentElement.clientWidth/clientHeight/scrollWidth/scrollHeight`
+  are normalised to layout pixels like the patched rects and `innerWidth`. They
+  are Chromium's root-viewport special case and used to stay in visual pixels,
+  which made installed plugins mix coordinate spaces under zoom:
+  - `dsh-rewind-plugin` clamps its panel with
+    `rect.right <= document.documentElement.clientWidth`; with a layout-pixel
+    rect against a visual-pixel viewport the panel always "fitted", so at 175%
+    it could open off-screen.
+  - CodeMirror (the sidebar editor) decides "iOS virtual keyboard is open" from
+    `visualViewport.height * scale / documentElement.clientHeight < 0.85`; with
+    a patched `visualViewport.height` (483) against a visual
+    `clientHeight` (846) that ratio was 0.57, i.e. a permanent false positive.
+
+### Tests
+
+- New check that `innerWidth`, `innerHeight`, `body.clientWidth`,
+  `documentElement.clientWidth/clientHeight` and the root rect all agree at
+  150%, plus teardown removing the instance shadow properties (40 checks).
+
 ## [0.6.2] - 2026-11-24
 
 ### Fixed

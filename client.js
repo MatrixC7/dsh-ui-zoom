@@ -455,11 +455,16 @@ window.__ModuleLoader__.load({
      * Known limits, kept in visual pixels on purpose:
      * - window.scrollX / scrollY and pageXOffset / pageYOffset: Chromium reads
      *   and writes root scrolling in visual pixels, so scaling only the getters
-     *   would desynchronize them from scrollTo();
-     * - document.documentElement.clientWidth / clientHeight: the root-viewport
-     *   special case (every other element already reports layout pixels);
+     *   would desynchronize them from scrollTo(); DSH never scrolls the root.
      * - IntersectionObserverEntry rects, wheel deltas and screenX / screenY are
      *   not pointer positions in the document layout.
+     *
+     * document.documentElement.clientWidth / clientHeight / scrollWidth /
+     * scrollHeight are normalised too (see installWindowAndRectPatches): they are
+     * the root-viewport special case, and leaving them in visual pixels made
+     * installed plugins mix spaces — dsh-rewind compared a patched rect against
+     * documentElement.clientWidth, CodeMirror derived "iOS keyboard open" from
+     * visualViewport.height / documentElement.clientHeight.
      * ========================================================================= */
     const origGetBoundingClientRect = Element.prototype.getBoundingClientRect;
     const origGetClientRects = Element.prototype.getClientRects;
@@ -531,6 +536,24 @@ window.__ModuleLoader__.load({
     const origVVOffsetLeftDesc = origVVProto ? Object.getOwnPropertyDescriptor(origVVProto, 'offsetLeft') : null;
     const origVVOffsetTopDesc = origVVProto ? Object.getOwnPropertyDescriptor(origVVProto, 'offsetTop') : null;
 
+    // The root element keeps its own viewport metrics: Chromium reports
+    // documentElement.clientWidth/clientHeight and scrollWidth/scrollHeight in
+    // visual pixels while every other box metric (including the patched rects)
+    // is in layout pixels. Two installed plugins mix the two — dsh-rewind's
+    // panel clamp compares a patched rect against documentElement.clientWidth,
+    // and CodeMirror decides the iOS keyboard is open from
+    // visualViewport.height / documentElement.clientHeight — so the root values
+    // are normalised on the instance instead of being left as a documented gap.
+    const ROOT_METRIC_NAMES = ['clientWidth', 'clientHeight', 'scrollWidth', 'scrollHeight'];
+    const origRootMetricDescs = {};
+    if (typeof document !== 'undefined' && document.documentElement) {
+      for (const name of ROOT_METRIC_NAMES) {
+        const desc = Object.getOwnPropertyDescriptor(Element.prototype, name);
+        if (desc && typeof desc.get === 'function') origRootMetricDescs[name] = desc;
+      }
+    }
+    const rootMetricPatched = new Set();
+
     function scaleRect(rect, factor) {
       const x = rect.x / factor;
       const y = rect.y / factor;
@@ -588,6 +611,24 @@ window.__ModuleLoader__.load({
               return Math.round(raw / (currentScale / 100));
             }
           });
+        } catch (e) {}
+      }
+
+      // 1b. documentElement client/scroll metrics in layout pixels
+      for (const name of ROOT_METRIC_NAMES) {
+        const desc = origRootMetricDescs[name];
+        if (!desc) continue;
+        try {
+          Object.defineProperty(document.documentElement, name, {
+            configurable: true,
+            enumerable: desc.enumerable,
+            get() {
+              const raw = desc.get.call(document.documentElement);
+              if (currentScale === 100) return raw;
+              return Math.round(raw / (currentScale / 100));
+            }
+          });
+          rootMetricPatched.add(name);
         } catch (e) {}
       }
 
@@ -747,6 +788,12 @@ window.__ModuleLoader__.load({
           if (origVVOffsetLeftDesc) Object.defineProperty(origVVProto, 'offsetLeft', origVVOffsetLeftDesc);
           if (origVVOffsetTopDesc) Object.defineProperty(origVVProto, 'offsetTop', origVVOffsetTopDesc);
         } catch (e) {}
+      }
+      if (typeof document !== 'undefined' && document.documentElement) {
+        for (const name of rootMetricPatched) {
+          try { delete document.documentElement[name]; } catch (e) {}
+        }
+        rootMetricPatched.clear();
       }
       Element.prototype.getBoundingClientRect = origGetBoundingClientRect;
       Element.prototype.getClientRects = origGetClientRects;

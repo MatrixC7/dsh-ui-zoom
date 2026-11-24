@@ -159,7 +159,7 @@ dsh plugin --profile web remove dsh-ui-zoom
 ## ⚠️ 兼容性与已知限制
 
 - 坐标引擎面向 **Chromium**（DSH Desktop 的 Electron 内核、基于 Chromium 的 Web GUI），其他浏览器未做验证。
-- 插件把矩形、视口尺寸、指针事件与命中测试统一换算到 CSS 布局像素；以下 API 按浏览器语义保持视觉像素，混用时需自行换算：窗口滚动量、`document.documentElement.clientWidth/clientHeight`、`IntersectionObserver` 条目矩形、滚轮 delta、`screenX/screenY`。详见 [`client.js`](client.js) 顶部说明。
+- 插件把矩形、视口尺寸、指针事件与命中测试统一换算到 CSS 布局像素；以下 API 按浏览器语义保持视觉像素，混用时需自行换算：窗口滚动量（`scrollX/scrollY`，DSH 根节点不滚动）、`IntersectionObserver` 条目矩形、滚轮 delta、`screenX/screenY`。根节点的 `clientWidth/clientHeight/scrollWidth/scrollHeight` 已统一换算成布局像素（`0.6.3` 起），和 `innerWidth`、矩形一致。详见 [`client.js`](client.js) 顶部说明。
 - 命中测试 API（`elementFromPoint` / `elementsFromPoint` / `caretRangeFromPoint` / `caretPositionFromPoint`）接收布局坐标，由插件换算成浏览器需要的视觉坐标。
 - 第三方插件若自行对 CSS `zoom` 做补偿，可能与本插件重复换算；遇到偏移请先停用其他缩放/transform 类插件排查。
 - **视口单位不随缩放缩小**：Chromium 不会把 `100vh`/`100vw` 除以 CSS `zoom`，所以用 `max-height: calc(100vh - …)` 限制高度的浮层在放大后会比窗口还大。模态 `<dialog>` 由 `compatDialogClamp` 收进窗口，用 `vh` 限高、自身可滚动的固定浮层由 `compatOverflowClamp` 处理（路由面板、峰谷提示这类；插件会在样式表里找 `vh` 限高规则，只收敛实测溢出窗口的元素）；其他浮层如需自行补偿，可除以本插件在根元素上提供的 `--dsh-ui-zoom-factor`（例如 `calc(100vh / var(--dsh-ui-zoom-factor, 1))`）。

@@ -230,6 +230,30 @@ async function main() {
     const expectedSelection = await cdp.evaluate('window.__text.slice(10, 30)')
     check('drag selection', selected === expectedSelection, JSON.stringify(selected))
 
+    // 2b. The root element's own viewport metrics must agree with the patched
+    //     innerWidth/innerHeight and rects: installed plugins mix them
+    //     (dsh-rewind compares a rect against documentElement.clientWidth,
+    //     CodeMirror derives "iOS keyboard open" from clientHeight), so a
+    //     visual-pixel root value would corrupt their maths under zoom.
+    const rootMetrics = await cdp.evaluate(`(() => {
+      const de = document.documentElement;
+      const rect = de.getBoundingClientRect();
+      return {
+        innerWidth: window.innerWidth, innerHeight: window.innerHeight,
+        clientWidth: de.clientWidth, clientHeight: de.clientHeight,
+        rectWidth: rect.width, rectHeight: rect.height,
+        bodyClientWidth: document.body.clientWidth,
+        hasOwn: Object.prototype.hasOwnProperty.call(de, 'clientWidth')
+      };
+    })()`)
+    check('root viewport metrics agree',
+      Math.abs(rootMetrics.innerWidth - rootMetrics.clientWidth) <= 1
+      && Math.abs(rootMetrics.innerHeight - rootMetrics.clientHeight) <= 1
+      && Math.abs(rootMetrics.rectWidth - rootMetrics.clientWidth) <= 1
+      && Math.abs(rootMetrics.rectHeight - rootMetrics.clientHeight) <= 1
+      && Math.abs(rootMetrics.bodyClientWidth - rootMetrics.clientWidth) <= 1,
+      JSON.stringify(rootMetrics))
+
     // 3. Uniform 5% ladder.
     await openPage(cdp, '?scale=125')
     await cdp.pressCtrl('=', 'Equal', 187)
@@ -393,10 +417,11 @@ async function main() {
         zoom: document.documentElement.style.zoom,
         factor: document.documentElement.style.getPropertyValue('--dsh-ui-zoom-factor'),
         dialogClamped: document.getElementById('tall-dialog').hasAttribute('data-dsh-ui-zoom-clamp'),
+        rootMetricShadow: Object.prototype.hasOwnProperty.call(document.documentElement, 'clientWidth'),
         toast: document.getElementById('dsh-zoom-hud') === null,
       };
     })()`)
-    check('teardown restores', teardown.styleCount === 0 && teardown.mousePatched === false && teardown.zoom === '' && teardown.factor === '' && teardown.dialogClamped === false && teardown.toast, JSON.stringify(teardown))
+    check('teardown restores', teardown.styleCount === 0 && teardown.mousePatched === false && teardown.zoom === '' && teardown.factor === '' && teardown.dialogClamped === false && teardown.rootMetricShadow === false && teardown.toast, JSON.stringify(teardown))
 
     const failed = results.filter(result => !result.ok)
     console.log(`\n${results.length - failed.length}/${results.length} checks passed`)
