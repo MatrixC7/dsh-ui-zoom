@@ -335,6 +335,17 @@ async function main() {
       plainDialog.clamped === false && plainDialog.buttonHit === 'tall-close' && plainFactor === '',
       JSON.stringify({ clamped: plainDialog.clamped, hit: plainDialog.buttonHit, factor: plainFactor }))
 
+    // The modal-presence flag drives the Windows titlebar drag-region lift; it
+    // must appear while a modal is open and disappear again afterwards (a
+    // document-wide :has() selector would do this in CSS, at a measured cost of
+    // ~76% extra script time on a streaming list, hence the flag).
+    const presenceOpen = await cdp.evaluate("document.documentElement.getAttribute('data-dsh-ui-zoom-modal')")
+    await cdp.evaluate('window.__closeTallDialog()')
+    await cdp.evaluate(`document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }))`)
+    await sleep(120)
+    const presenceClosed = await cdp.evaluate("document.documentElement.getAttribute('data-dsh-ui-zoom-modal')")
+    check('modal presence flag', presenceOpen === '1' && presenceClosed === null, JSON.stringify({ open: presenceOpen, closed: presenceClosed }))
+
     // Control: with the shim switched off the same fixture really does overflow
     // the window and its close button falls outside it, so the checks above
     // prove the fix instead of a dialog that never overflows in the first place.

@@ -4,6 +4,24 @@ All notable changes to `dsh-ui-zoom` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [0.6.2] - 2026-11-24
+
+### Fixed
+
+- The drag-region lift no longer costs script time. 0.6.1 gated it with
+  `html:has([aria-modal="true"]) …, html:has(dialog[open]) …`; a harness
+  benchmark (3000 rows, constant text updates and appends, forced layout per
+  iteration) measured **+76% script time** for one such rule and **+161%** for
+  two, which a streaming chat would pay on every mutation. The flag is now
+  maintained by the plugin as `html[data-dsh-ui-zoom-modal]`, kept in sync on
+  click / pointerup / keydown / `toggle` plus a 1.5 s safety net for modals the
+  app opens on its own. Same behaviour, no selector to re-evaluate.
+
+### Tests
+
+- New check that the flag appears while a dialog is open and disappears once it
+  closes (39 checks total).
+
 ## [0.6.1] - 2026-11-24
 
 ### Fixed

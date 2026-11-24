@@ -225,14 +225,12 @@ window.__ModuleLoader__.load({
           }
           /* Belt and braces: while a modal is open, drop the titlebar's own drag
              region for that moment (the window cannot usefully be dragged behind a
-             modal anyway). :has() re-evaluates when the modal closes, so dragging
-             comes straight back. */
-          html:has([aria-modal="true"]) [data-windows-titlebar] .frame::before,
-          html:has([aria-modal="true"]) [data-windows-titlebar].frame::before,
-          html[data-windows-titlebar]:has([aria-modal="true"]) .frame::before,
-          html:has(dialog[open]) [data-windows-titlebar] .frame::before,
-          html:has(dialog[open]) [data-windows-titlebar].frame::before,
-          html[data-windows-titlebar]:has(dialog[open]) .frame::before {
+             modal anyway). The attribute is maintained by the plugin rather than
+             with :has(), which measurably slows down a streaming chat: one :has()
+             rule over a 3000-row list cost ~76% extra script time in the harness. */
+          html[data-dsh-ui-zoom-modal="1"] [data-windows-titlebar] .frame::before,
+          html[data-dsh-ui-zoom-modal="1"] [data-windows-titlebar].frame::before,
+          html[data-windows-titlebar][data-dsh-ui-zoom-modal="1"] .frame::before {
             -webkit-app-region: no-drag !important;
           }
         `);
@@ -1026,6 +1024,66 @@ window.__ModuleLoader__.load({
       };
     }
 
+    const MODAL_PRESENCE_ATTR = 'data-dsh-ui-zoom-modal';
+    let modalPresenceFrame = null;
+    let modalPresenceTimer = null;
+
+    /**
+     * Mirror "a modal is open" onto <html>.
+     *
+     * The Windows titlebar drag region swallows pointer input, so a modal that
+     * reaches the top of the window must lift it (see the stylesheet rule). A
+     * `:has()` selector would do that without JavaScript, but it makes every
+     * chat mutation re-evaluate a document-wide selector — measured at ~76% extra
+     * script time in the harness — so the flag is kept here instead.
+     */
+    function syncModalPresence() {
+      if (typeof document === 'undefined') return;
+      modalPresenceFrame = null;
+      let open = false;
+      try { open = document.querySelector('[aria-modal="true"], dialog[open]') !== null; } catch (e) { open = false; }
+      try {
+        if (open) document.documentElement.setAttribute(MODAL_PRESENCE_ATTR, '1');
+        else document.documentElement.removeAttribute(MODAL_PRESENCE_ATTR);
+      } catch (e) {}
+    }
+
+    function scheduleModalPresenceSync() {
+      if (typeof document === 'undefined') return;
+      if (modalPresenceFrame !== null) return;
+      modalPresenceFrame = typeof requestAnimationFrame === 'function'
+        ? requestAnimationFrame(syncModalPresence)
+        : setTimeout(syncModalPresence, 16);
+    }
+
+    function installModalPresenceWatcher() {
+      if (typeof document === 'undefined') return () => {};
+      const handle = () => scheduleModalPresenceSync();
+      // Any of these can open or close a modal: a click on a menu entry, a
+      // keyboard shortcut (Ctrl+, opens settings), Escape, or a native <dialog>
+      // toggling. The timer is the safety net for modals the app opens on its
+      // own, where no event reaches us first.
+      document.addEventListener('click', handle, true);
+      document.addEventListener('pointerup', handle, true);
+      document.addEventListener('keydown', handle, true);
+      document.addEventListener('toggle', handle, true);
+      modalPresenceTimer = setInterval(syncModalPresence, 1500);
+      syncModalPresence();
+      return () => {
+        document.removeEventListener('click', handle, true);
+        document.removeEventListener('pointerup', handle, true);
+        document.removeEventListener('keydown', handle, true);
+        document.removeEventListener('toggle', handle, true);
+        if (modalPresenceTimer !== null) { clearInterval(modalPresenceTimer); modalPresenceTimer = null; }
+        if (modalPresenceFrame !== null) {
+          if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(modalPresenceFrame);
+          clearTimeout(modalPresenceFrame);
+          modalPresenceFrame = null;
+        }
+        try { document.documentElement.removeAttribute(MODAL_PRESENCE_ATTR); } catch (e) {}
+      };
+    }
+
     function installDialogClampWatchers() {
       if (typeof document === 'undefined' || !dialogClampEnabled()) return () => {};
       const restoreShowModal = patchDialogShowModal();
@@ -1360,6 +1418,7 @@ window.__ModuleLoader__.load({
           installWindowAndRectPatches();
           applyZoomToDOM(currentScale);
           const disposeDialogClampWatchers = installDialogClampWatchers();
+          const disposeModalPresence = installModalPresenceWatcher();
 
           // Workaround for third-party widget button clicks under pointerdown capture
           function handleProtectedPointerDown(e) {
@@ -1427,6 +1486,7 @@ window.__ModuleLoader__.load({
           return () => {
             uninstallWindowAndRectPatches();
             disposeDialogClampWatchers();
+            disposeModalPresence();
             window.removeEventListener('pointerdown', handleProtectedPointerDown, true);
             window.removeEventListener('keydown', handleKeyDown, { capture: true });
             window.removeEventListener('wheel', handleWheel);
